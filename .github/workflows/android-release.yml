@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_title:
-        description: 'Release Title (e.g. CarCastMirror v1.0.5)'
+        description: 'Release Title (e.g. CarCastMirror v1.0.7)'
         required: false
         default: ''
       prerelease:
@@ -50,7 +50,6 @@ jobs:
           VERSION_NAME=$(grep 'versionName =' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           VERSION_CODE=$(grep 'versionCode =' app/build.gradle.kts | head -n1 | sed -E 's/.*= *([0-9]+).*/\1/')
           
-          # If triggered by a tag, use tag if available
           TAG_NAME="${GITHUB_REF_NAME}"
           if [[ -z "$TAG_NAME" || "$TAG_NAME" == "main" || "$TAG_NAME" == "master" ]]; then
             TAG_NAME="v${VERSION_NAME}"
@@ -64,7 +63,7 @@ jobs:
           echo "Detected Version Code: ${VERSION_CODE}"
           echo "Release Tag: ${TAG_NAME}"
 
-      - name: Setup Android Signing Keystore
+      - name: Setup Android Release Signing Key
         id: setup_signing
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY || secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -72,38 +71,65 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: |
-          mkdir -p "$HOME/.android"
-          if [ -n "$SIGNING_KEY" ]; then
-            echo "Custom signing key found in secrets. Decoding release keystore..."
-            echo "$SIGNING_KEY" | base64 -d > "$HOME/release.keystore"
-            echo "RELEASE_KEYSTORE_PATH=$HOME/release.keystore" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
-            echo "KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
-            echo "has_custom_key=true" >> $GITHUB_OUTPUT
-          else
-            echo "No custom SIGNING_KEY secret found. Release build will sign with standard debug key for immediate testing."
-            echo "has_custom_key=false" >> $GITHUB_OUTPUT
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::Production release signing key (SIGNING_KEY) is missing from repository secrets! Release aborted to prevent generating inconsistent signing keys."
+            exit 1
           fi
+          
+          mkdir -p "$HOME/.signing"
+          echo "$SIGNING_KEY" | base64 -d > "$HOME/.signing/release.keystore"
+          
+          echo "RELEASE_KEYSTORE_PATH=$HOME/.signing/release.keystore" >> $GITHUB_ENV
+          echo "STORE_PASSWORD=${STORE_PASSWORD:-android}" >> $GITHUB_ENV
+          echo "KEY_ALIAS=${KEY_ALIAS:-androiddebugkey}" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${KEY_PASSWORD:-android}" >> $GITHUB_ENV
 
       - name: Build Android Release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify Release Signing Certificate & Compatibility
+        id: verify_cert
+        run: |
+          RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$RELEASE_APK" ]; then
+            echo "::error::Release APK not found in app/build/outputs/apk/release!"
+            exit 1
+          fi
+          
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found in Android build-tools!"
+            exit 1
+          fi
+          
+          echo "Verifying APK signature using $APKSIGNER..."
+          CERT_OUTPUT=$("$APKSIGNER" verify --print-certs "$RELEASE_APK")
+          echo "$CERT_OUTPUT"
+          
+          # Extract SHA-256 certificate digest (lowercase without colons)
+          CERT_DIGEST=$(echo "$CERT_OUTPUT" | grep -i "Signer #1 certificate SHA-256 digest:" | awk '{print $NF}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          
+          # Expected certificate SHA-256 digest compatible with existing installs
+          EXPECTED_DIGEST="82d57a4863a3cf3471a6293fbecac3ab8f44218d62ef28fdd22f2e85c0d8928e"
+          
+          echo "Found Certificate SHA-256:    $CERT_DIGEST"
+          echo "Expected Certificate SHA-256: $EXPECTED_DIGEST"
+          
+          if [ "$CERT_DIGEST" != "$EXPECTED_DIGEST" ]; then
+            echo "::error::Certificate mismatch! Expected $EXPECTED_DIGEST but found $CERT_DIGEST. Aborting release to protect update compatibility."
+            exit 1
+          fi
+          
+          echo "Certificate verified successfully! 100% compatible with existing installed CarCastMirror app."
+          echo "cert_digest=${CERT_DIGEST}" >> $GITHUB_OUTPUT
 
       - name: Package & Prepare Release Artifacts
         id: prepare_artifacts
         run: |
           mkdir -p release_dist
-          
-          # Find generated release APK
           RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          if [ -z "$RELEASE_APK" ]; then
-            echo "Error: Release APK not found in app/build/outputs/apk/release!"
-            exit 1
-          fi
-          
           VERSION_NAME="${{ steps.version_meta.outputs.version_name }}"
           
-          # Copy to standard standardized filenames
           cp "$RELEASE_APK" release_dist/CarCastMirror.apk
           cp "$RELEASE_APK" "release_dist/CarCastMirror-v${VERSION_NAME}.apk"
           
@@ -130,8 +156,6 @@ jobs:
             "$AAPT" dump badging release_dist/CarCastMirror.apk | head -n 25
             echo "=== Validating Native ABIs ==="
             "$AAPT" list release_dist/CarCastMirror.apk | grep "lib/" | head -n 15
-          else
-            echo "aapt tool not found, skipping badging dump."
           fi
 
       - name: Generate Release Notes
@@ -141,12 +165,12 @@ jobs:
           VERSION_CODE="${{ steps.version_meta.outputs.version_code }}"
           APK_SHA="${{ steps.prepare_artifacts.outputs.apk_sha256 }}"
           APK_SIZE="${{ steps.prepare_artifacts.outputs.apk_size_mb }}"
-          CUSTOM_KEY="${{ steps.setup_signing.outputs.has_custom_key }}"
+          CERT_SHA="${{ steps.verify_cert.outputs.cert_digest }}"
           
           cat << 'EOF' > release_body.md
           ## 🚗 CarCast Mirror Release v__VERSION_NAME__ (Build __VERSION_CODE__)
           
-          Automated production build published by GitHub Actions.
+          Production release built, signed, and verified via GitHub Actions.
           
           ### 📋 Release Metadata
           | Property | Value |
@@ -155,7 +179,8 @@ jobs:
           | **Version Code** | `__VERSION_CODE__` |
           | **Package ID** | `com.carcast.mirror` |
           | **File Size** | `__APK_SIZE__ MB` |
-          | **Signature Status** | `__SIGNATURE_STATUS__` |
+          | **Signing Certificate (SHA-256)** | `82:D5:7A:48:63:A3:CF:34:71:A6:29:3F:BE:CA:C3:AB:8F:44:21:8D:62:EF:28:FD:D2:2F:2E:85:C0:D8:92:8E` |
+          | **Update Compatibility** | Verified compatible with all previous CarCast Mirror installs |
           | **Target Android** | Android 8.0 (API 26) through Android 14+ (API 34) |
           
           ### 🔒 Checksums & Verification
@@ -191,16 +216,10 @@ jobs:
           - If CarCast Mirror is already installed, open **Settings ⚙️ ➔ Check for Updates** to update directly over Wi-Fi without USB.
           EOF
           
-          # Replace placeholders
           sed -i "s/__VERSION_NAME__/${VERSION_NAME}/g" release_body.md
           sed -i "s/__VERSION_CODE__/${VERSION_CODE}/g" release_body.md
           sed -i "s/__APK_SHA__/${APK_SHA}/g" release_body.md
           sed -i "s/__APK_SIZE__/${APK_SIZE}/g" release_body.md
-          if [ "$CUSTOM_KEY" = "true" ]; then
-            sed -i "s/__SIGNATURE_STATUS__/Signed with Production Release Key/g" release_body.md
-          else
-            sed -i "s/__SIGNATURE_STATUS__/Signed with Runner Key (Installable on Car LCD)/g" release_body.md
-          fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
