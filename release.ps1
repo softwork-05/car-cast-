@@ -20,6 +20,7 @@ param(
     [string]$Tag = "",
     
     [switch]$SkipTests = $false,
+    [switch]$Force = $false,
     
     [string]$Remote = "origin",
     [string]$Branch = "main"
@@ -171,8 +172,9 @@ Write-Host "`nPushing $Branch and tag $ReleaseTag to $Remote..." -ForegroundColo
 Write-Host "Command: git push -u $Remote $Branch --tags" -ForegroundColor DarkGray
 
 try {
-    git push -u $Remote $Branch
-    git push $Remote $ReleaseTag
+    $forceParam = if ($Force) { @("--force") } else { @() }
+    git push -u $Remote $Branch @forceParam
+    git push $Remote $ReleaseTag @forceParam
     Write-Host "`nSuccessfully pushed to GitHub!" -ForegroundColor Green
     Write-Host "GitHub Actions workflow triggered at: https://github.com/softwork-05/car-cast-/actions" -ForegroundColor Cyan
     Write-Host "Releases available at: https://github.com/softwork-05/car-cast-/releases" -ForegroundColor Cyan
