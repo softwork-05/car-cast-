@@ -43,6 +43,38 @@ It transforms any Android car stereo or head unit into a **Dual-Platform Wireles
 
 ---
 
+## 🔄 Automated Releases & In-App Auto-Updates
+
+CarCast Mirror features an automated CI/CD release pipeline via GitHub Actions and an in-app updater connected directly to GitHub Releases.
+
+### 1. In-App Auto-Update Behavior
+- **Authoritative Version Check**: Compares numeric `versionCode` against the latest GitHub Release asset.
+- **5-State Update Flow**:
+  1. `CHECKING` ➔ Queries `https://api.github.com/repos/softwork-05/car-cast-/releases/latest`.
+  2. `UP_TO_DATE` ➔ Installed version is current (`installedCode >= latestCode`).
+  3. `UPDATE_AVAILABLE` ➔ Newer release detected (`latestCode > installedCode`).
+  4. `DOWNLOADING` ➔ Live download progress with SHA-256 integrity verification.
+  5. `READY_TO_INSTALL` ➔ Launches Android Package Installer prompt directly.
+- **Obsolete Cache Cleanup**: Automatically removes previously downloaded APK files once installed.
+
+### 2. Publishing a New Release
+To release an update, run the release script from the `CarCastMirror` project directory:
+```powershell
+# Automated release with patch increment (e.g. 1.0.7 -> 1.0.8)
+.\release.ps1 -Bump patch
+
+# Or release with a specific tag
+.\release.ps1 -Tag v1.0.7
+```
+The script will:
+1. Bump `versionCode` and `versionName` in `app/build.gradle.kts`.
+2. Run all unit tests (`./gradlew testDebugUnitTest`).
+3. Commit and create a Git release tag (`vX.Y.Z`).
+4. Push to GitHub (`softwork-05/car-cast-`).
+5. GitHub Actions builds the APK, verifies SHA-256, and publishes a new GitHub Release with downloadable APK assets!
+
+---
+
 ## 📜 License & Credits
 
 CarCast Mirror is licensed under the [GNU General Public License v3.0](file:///c:/Users/Mustajab/Downloads/CarCastMirror_source_patch/CarCastMirror/LICENSE).
