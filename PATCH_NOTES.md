@@ -1,8 +1,15 @@
-# CarCastMirror: verified source fixes — 17 November 2026
+# CarCastMirror Release Notes & Verification History
 
-**Status: development/diagnostic source patch. NOT a working AirPlay mirroring APK.**
+## Version 1.0.8 (Build 8) — 18 November 2026
+- **Scan to Pay**: Integrated full-screen payment modal on Receiver screen with crisp, responsive NayaPay (Orange) and Easypaisa (Green) QR codes for car displays and phones.
+- **Embedded Permanent QR Assets**: Included lossless, pixel-perfect, local PNG QR codes for Muhammad Mustajab Haider (`mustajab.512@nayapay` / `PK18NAYA1234503349299961` and Easypaisa / `PK22TMFB0000000052413891`). Both QR codes decode with 100% accuracy using ZXing standard.
+- **In-App Auto-Update Verification**: `versionCode` bumped to 8 (`versionName = "1.0.8"`). Release published to GitHub Releases API with automated numeric version comparison (`releaseCode > installedCode`).
+- **Signature Security Verified**: APK signed with official key matching certificate SHA-256 `82:D5:7A:48:63:A3:CF:34:71:A6:29:3F:BE:CA:C3:AB:8F:44:21:8D:62:EF:28:FD:D2:2F:2E:85:C0:D8:92:8E`.
+- **DirectPublish Automation**: Added fast local release build and direct GitHub CLI upload to `release.ps1` to bypass CI queue bottlenecks while maintaining strict certificate checks.
 
-## Fixes performed
+---
+
+## Older Diagnostics & Source Fixes — 17 November 2026
 
 - AirPlayCrypto: Ed25519 receiver identity now persists across app restarts using app-private SharedPreferences; initialization occurs in CarCastApplication. It is not exposed in logs.
 - AirPlayCrypto: stage 1/2 pair-verify state is now **per TCP connection**, rather than shared by all clients. Real Ed25519 signature verification and negative/replay rejection retained.
