@@ -49,3 +49,5 @@ Thumbs.db
 
 # Ensure native prebuilt libraries are committed
 !app/src/main/jniLibs/**
+
+release_dist/
