@@ -1,0 +1,219 @@
+name: CarCastMirror Automated Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_title:
+        description: 'Release Title (e.g. CarCastMirror v1.0.5)'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark as pre-release?'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build, Verify & Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+          cache: 'gradle'
+
+      - name: Grant Execute Permission to gradlew
+        run: chmod +x gradlew
+
+      - name: Run Gradle Unit Tests
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Extract Version Metadata
+        id: version_meta
+        run: |
+          VERSION_NAME=$(grep 'versionName =' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE=$(grep 'versionCode =' app/build.gradle.kts | head -n1 | sed -E 's/.*= *([0-9]+).*/\1/')
+          
+          # If triggered by a tag, use tag if available
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [[ -z "$TAG_NAME" || "$TAG_NAME" == "main" || "$TAG_NAME" == "master" ]]; then
+            TAG_NAME="v${VERSION_NAME}"
+          fi
+          
+          echo "version_name=${VERSION_NAME}" >> $GITHUB_OUTPUT
+          echo "version_code=${VERSION_CODE}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "Detected Version Name: ${VERSION_NAME}"
+          echo "Detected Version Code: ${VERSION_CODE}"
+          echo "Release Tag: ${TAG_NAME}"
+
+      - name: Setup Android Signing Keystore
+        id: setup_signing
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY || secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "Custom signing key found in secrets. Decoding release keystore..."
+            echo "$SIGNING_KEY" | base64 -d > "$HOME/release.keystore"
+            echo "RELEASE_KEYSTORE_PATH=$HOME/release.keystore" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
+            echo "KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+            echo "has_custom_key=true" >> $GITHUB_OUTPUT
+          else
+            echo "No custom SIGNING_KEY secret found. Release build will sign with standard debug key for immediate testing."
+            echo "has_custom_key=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Android Release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Package & Prepare Release Artifacts
+        id: prepare_artifacts
+        run: |
+          mkdir -p release_dist
+          
+          # Find generated release APK
+          RELEASE_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$RELEASE_APK" ]; then
+            echo "Error: Release APK not found in app/build/outputs/apk/release!"
+            exit 1
+          fi
+          
+          VERSION_NAME="${{ steps.version_meta.outputs.version_name }}"
+          
+          # Copy to standard standardized filenames
+          cp "$RELEASE_APK" release_dist/CarCastMirror.apk
+          cp "$RELEASE_APK" "release_dist/CarCastMirror-v${VERSION_NAME}.apk"
+          
+          cd release_dist
+          sha256sum CarCastMirror.apk > CarCastMirror.apk.sha256
+          sha256sum CarCastMirror.apk "CarCastMirror-v${VERSION_NAME}.apk" > checksums.txt
+          
+          APK_SHA256=$(cat CarCastMirror.apk.sha256 | awk '{print $1}')
+          APK_SIZE_BYTES=$(stat -c%s CarCastMirror.apk)
+          APK_SIZE_MB=$(echo "scale=2; $APK_SIZE_BYTES / 1048576" | bc)
+          
+          echo "apk_sha256=${APK_SHA256}" >> $GITHUB_OUTPUT
+          echo "apk_size_mb=${APK_SIZE_MB}" >> $GITHUB_OUTPUT
+          cd ..
+          
+          echo "Built APK Size: ${APK_SIZE_MB} MB"
+          echo "APK SHA-256: ${APK_SHA256}"
+
+      - name: Verify APK Integrity and Badging
+        run: |
+          AAPT=$(find $ANDROID_HOME/build-tools -name aapt | sort -V | tail -n 1)
+          if [ -x "$AAPT" ]; then
+            echo "=== APK Badging Verification ==="
+            "$AAPT" dump badging release_dist/CarCastMirror.apk | head -n 25
+            echo "=== Validating Native ABIs ==="
+            "$AAPT" list release_dist/CarCastMirror.apk | grep "lib/" | head -n 15
+          else
+            echo "aapt tool not found, skipping badging dump."
+          fi
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          VERSION_NAME="${{ steps.version_meta.outputs.version_name }}"
+          VERSION_CODE="${{ steps.version_meta.outputs.version_code }}"
+          APK_SHA="${{ steps.prepare_artifacts.outputs.apk_sha256 }}"
+          APK_SIZE="${{ steps.prepare_artifacts.outputs.apk_size_mb }}"
+          CUSTOM_KEY="${{ steps.setup_signing.outputs.has_custom_key }}"
+          
+          cat << 'EOF' > release_body.md
+          ## 🚗 CarCast Mirror Release v__VERSION_NAME__ (Build __VERSION_CODE__)
+          
+          Automated production build published by GitHub Actions.
+          
+          ### 📋 Release Metadata
+          | Property | Value |
+          |---|---|
+          | **Version Name** | `v__VERSION_NAME__` |
+          | **Version Code** | `__VERSION_CODE__` |
+          | **Package ID** | `com.carcast.mirror` |
+          | **File Size** | `__APK_SIZE__ MB` |
+          | **Signature Status** | `__SIGNATURE_STATUS__` |
+          | **Target Android** | Android 8.0 (API 26) through Android 14+ (API 34) |
+          
+          ### 🔒 Checksums & Verification
+          Verify package integrity before installing:
+          ```text
+          SHA-256: __APK_SHA__  CarCastMirror.apk
+          ```
+          
+          ---
+          
+          ### ✨ Key Features & Improvements
+          - 🍏 **Apple iOS AirPlay 1080p Mirroring**: Native UxPlay engine with FairPlay authentication, low-latency H.264/HEVC hardware decoding, and automatic zero-config mDNS discovery (`_airplay._tcp`).
+          - 📱 **Android Screen & Internal Audio Mirroring**: Low-latency 60 FPS screen casting with `AudioPlaybackCapture` routing phone sound directly through car LCD speakers.
+          - 🕹️ **Reverse Touch Control**: Control mirrored Android phones directly from the car touchscreen with smooth multi-touch gesture forwarding.
+          - 🔄 **Orientation & Dynamic Aspect Ratio**: Responsive portrait/landscape UI for phones and car displays, with adaptive FIT_CENTER letterboxing and FULLSCREEN modes.
+          - 🚀 **Smart In-App Auto-Updates**: Seamless version checks via GitHub Releases API with numeric `versionCode` validation and automatic cleanup of obsolete cached APKs.
+          
+          ---
+          
+          ### 📦 Installation Instructions
+          
+          #### On Automotive Car Head Unit / LCD:
+          1. Download `CarCastMirror.apk` onto a USB flash drive.
+          2. Connect the USB drive to your car head unit.
+          3. Open the car's **File Manager** and tap `CarCastMirror.apk`.
+          4. Confirm installation. Launch CarCast Mirror.
+          
+          #### On Android Phone (Sender mode):
+          1. Download `CarCastMirror.apk` and tap to install (enable "Install unknown apps" if prompted).
+          2. Launch the app and select **Start Phone Sender** or scan the QR code displayed on the car screen.
+          
+          #### In-App Auto-Update:
+          - If CarCast Mirror is already installed, open **Settings ⚙️ ➔ Check for Updates** to update directly over Wi-Fi without USB.
+          EOF
+          
+          # Replace placeholders
+          sed -i "s/__VERSION_NAME__/${VERSION_NAME}/g" release_body.md
+          sed -i "s/__VERSION_CODE__/${VERSION_CODE}/g" release_body.md
+          sed -i "s/__APK_SHA__/${APK_SHA}/g" release_body.md
+          sed -i "s/__APK_SIZE__/${APK_SIZE}/g" release_body.md
+          if [ "$CUSTOM_KEY" = "true" ]; then
+            sed -i "s/__SIGNATURE_STATUS__/Signed with Production Release Key/g" release_body.md
+          else
+            sed -i "s/__SIGNATURE_STATUS__/Signed with Runner Key (Installable on Car LCD)/g" release_body.md
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version_meta.outputs.tag_name }}
+          name: ${{ inputs.release_title || format('CarCastMirror v{0} (Build {1})', steps.version_meta.outputs.version_name, steps.version_meta.outputs.version_code) }}
+          body_path: release_body.md
+          draft: false
+          prerelease: ${{ inputs.prerelease || false }}
+          files: |
+            release_dist/CarCastMirror.apk
+            release_dist/CarCastMirror-v${{ steps.version_meta.outputs.version_name }}.apk
+            release_dist/CarCastMirror.apk.sha256
+            release_dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

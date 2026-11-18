@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">CarCast Mirror</string>
+    <string name="channel_name">CarCast Mirror Service</string>
+    <string name="channel_description">Active AirPlay and Android Mirroring receiver service</string>
+    <string name="service_running">CarCast Mirror receiver is active and ready for connections</string>
+    <string name="accessibility_service_description">Allows CarCast Mirror to perform reverse touch gestures on this phone when you touch the Car LCD screen.</string>
+</resources>

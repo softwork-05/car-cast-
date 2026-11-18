@@ -1,0 +1,25 @@
+LOCAL JVM VERIFICATION — 2026-11-17
+
+Edited AirPlayCrypto.kt and AirPlayRtspServer.kt compiled against BouncyCastle 1.80
+and lightweight Java/Kotlin Android + plist test stubs.
+This is NOT an Android SDK/Gradle build and does not prove iPhone compatibility.
+
+CRYPTO:
+PASS identity key is 32 bytes
+PASS same seed retains receiver identity
+PASS malformed first stage rejected
+PASS encrypted server signature is 96 bytes
+PASS server cryptographic signature verifies
+PASS valid client pair verify stage 2
+PASS stage 2 cannot be replayed
+PASS independent sessions do not share verification state
+PASS signature tied to ephemeral session
+
+LOCAL TCP:
+PASS port 7000 RTSP OPTIONS and CSeq
+PASS port 5000 transient pairing returns 32-byte public key
+PASS missing FairPlay reports failure instead of fake 142-byte success
+PASS FairPlay failure is logged
+
+NOT TESTED:
+Android APK build, physical iPhone, real native FairPlay or mirrored media.
