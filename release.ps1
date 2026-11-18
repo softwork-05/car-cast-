@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     CarCast Mirror - Automated Release & GitHub Direct Publisher
 
@@ -265,8 +265,17 @@ SHA-256: $apkHash  CarCastMirror.apk
 "@ | Set-Content -Path $notesFile -Encoding UTF8
 
     # Check if release already exists on GitHub
-    $releaseExists = gh release view $ReleaseTag --repo $Repo 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $releaseExists = $false
+    try {
+        $existing = gh release view $ReleaseTag --repo $Repo --json tagName 2>$null | ConvertFrom-Json
+        if ($existing -and $existing.tagName -eq $ReleaseTag) {
+            $releaseExists = $true
+        }
+    } catch {
+        $releaseExists = $false
+    }
+
+    if ($releaseExists) {
         Write-Host "Release $ReleaseTag already exists. Uploading assets to existing release..." -ForegroundColor Yellow
         gh release upload $ReleaseTag "$distApk#CarCastMirror.apk" "$distVersionedApk#CarCastMirror-$ReleaseTag.apk" (Join-Path $DistDir "CarCastMirror.apk.sha256") (Join-Path $DistDir "checksums.txt") --clobber --repo $Repo
     } else {
