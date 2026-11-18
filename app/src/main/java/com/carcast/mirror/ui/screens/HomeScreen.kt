@@ -92,6 +92,7 @@ fun HomeScreen(
 ) {
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isLogDialogOpen by remember { mutableStateOf(false) }
+    var isPaymentDialogOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("carcast_prefs", android.content.Context.MODE_PRIVATE) }
     val hasUpdate = remember(status) { prefs.getBoolean("update_available", false) }
@@ -242,6 +243,48 @@ fun HomeScreen(
                         }
                     }
 
+                    // Scan to Pay Button (Prominent QR / Payment action)
+                    if (isCompact) {
+                        IconButton(
+                            onClick = { isPaymentDialogOpen = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFF1E293B), CircleShape)
+                                .border(1.dp, Color(0xFFFF9100), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCode,
+                                contentDescription = "Scan to Pay",
+                                tint = Color(0xFFFF9100),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFF1E293B))
+                                .border(1.dp, Color(0xFFFF9100), RoundedCornerShape(20.dp))
+                                .clickable { isPaymentDialogOpen = true }
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCode,
+                                contentDescription = "Scan to Pay",
+                                tint = Color(0xFFFF9100),
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "Scan to Pay",
+                                color = TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     // Debug Log Viewer Button (Bug icon)
                     IconButton(
                         onClick = { isLogDialogOpen = true },
@@ -320,7 +363,8 @@ fun HomeScreen(
                         displayConfig = displayConfig,
                         portalUrl = portalUrl,
                         qrBitmap = qrBitmap,
-                        onEditDeviceName = onEditDeviceName
+                        onEditDeviceName = onEditDeviceName,
+                        onOpenPayment = { isPaymentDialogOpen = true }
                     )
 
                     // iPhone Card (Portrait)
@@ -372,6 +416,7 @@ fun HomeScreen(
                             portalUrl = portalUrl,
                             qrBitmap = qrBitmap,
                             onEditDeviceName = onEditDeviceName,
+                            onOpenPayment = { isPaymentDialogOpen = true },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .then(if (isShortHeight) Modifier.verticalScroll(rememberScrollState()) else Modifier)
@@ -494,6 +539,11 @@ fun HomeScreen(
                 }
             )
         }
+
+        // Live Payment QR Dialog (NayaPay & Easypaisa)
+        if (isPaymentDialogOpen) {
+            PaymentDialog(onDismiss = { isPaymentDialogOpen = false })
+        }
     }
 }
 
@@ -505,6 +555,7 @@ private fun StatusAndNetworkCard(
     portalUrl: String,
     qrBitmap: Bitmap?,
     onEditDeviceName: () -> Unit,
+    onOpenPayment: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     AutomotiveCard(
@@ -693,6 +744,43 @@ private fun StatusAndNetworkCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
+
+            // Quick "Scan to Pay" Action Pill
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF131B2A))
+                    .border(1.dp, Color(0xFFFF9100).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                    .clickable { onOpenPayment() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCode,
+                        contentDescription = null,
+                        tint = Color(0xFFFF9100),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Scan to Pay (NayaPay & Easypaisa)",
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    text = "Open QR ➔",
+                    color = ElectricCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

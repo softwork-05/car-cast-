@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     CarCast Mirror - Automated Release & GitHub Direct Publisher
 
@@ -207,7 +207,7 @@ git add release.ps1
 
 $gitStatus = git status --porcelain
 if ($gitStatus) {
-    $commitMsg = "Release $ReleaseTag: Android Cast & UxPlay AirPlay Receiver (Build $NewVersionCode)"
+    $commitMsg = "Release ${ReleaseTag}: Add Scan to Pay Button & NayaPay/Easypaisa QR Codes (Build $NewVersionCode)"
     Write-Host "Creating Git commit: '$commitMsg'..." -ForegroundColor Cyan
     git commit -m "$commitMsg"
 } else {
@@ -256,6 +256,7 @@ SHA-256: $apkHash  CarCastMirror.apk
 ---
 
 ### ✨ Key Features & Improvements
+- 💳 **Scan to Pay (NayaPay & Easypaisa QR Codes)**: Instant full-screen payment modal on Receiver screen with crisp, responsive NayaPay (Orange) and Easypaisa (Green) QR codes for car displays and phones.
 - 🍏 **Apple iOS AirPlay 1080p Mirroring**: Native UxPlay engine with FairPlay authentication, low-latency H.264/HEVC hardware decoding, and zero-config mDNS discovery.
 - 📱 **Android Screen & Internal Audio Mirroring**: Low-latency 60 FPS screen casting with AudioPlaybackCapture routing sound directly through car LCD speakers.
 - 🕹️ **Reverse Touch Control**: Control mirrored Android phones directly from the car touchscreen with smooth multi-touch gesture forwarding.
