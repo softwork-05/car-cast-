@@ -107,7 +107,7 @@ jobs:
           echo "$CERT_OUTPUT"
           
           # Extract SHA-256 certificate digest (lowercase without colons)
-          CERT_DIGEST=$(echo "$CERT_OUTPUT" | grep -i "Signer #1 certificate SHA-256 digest:" | awk '{print $NF}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          CERT_DIGEST=$(echo "$CERT_OUTPUT" | grep -i "certificate SHA-256 digest:" | head -n 1 | awk '{print $NF}' | tr -d ':' | tr '[:upper:]' '[:lower:]')
           
           # Expected certificate SHA-256 digest compatible with existing installs
           EXPECTED_DIGEST="82d57a4863a3cf3471a6293fbecac3ab8f44218d62ef28fdd22f2e85c0d8928e"
