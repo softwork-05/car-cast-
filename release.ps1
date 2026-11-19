@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     CarCast Mirror - Automated Release & GitHub Direct Publisher
 
@@ -240,11 +240,11 @@ Official verified production release published directly via GitHub CLI.
 ### 📋 Release Metadata
 | Property | Value |
 |---|---|
-| **Version Name** | `$NewVersionName` |
-| **Version Code** | `$NewVersionCode` |
-| **Package ID** | `com.carcast.mirror` |
-| **File Size** | `$([math]::Round((Get-Item $distApk).Length / 1MB, 2)) MB` |
-| **Signing Certificate (SHA-256)** | `82:D5:7A:48:63:A3:CF:34:71:A6:29:3F:BE:CA:C3:AB:8F:44:21:8D:62:EF:28:FD:D2:2F:2E:85:C0:D8:92:8E` |
+| **Version Name** | ``$NewVersionName`` |
+| **Version Code** | ``$NewVersionCode`` |
+| **Package ID** | ``com.carcast.mirror`` |
+| **File Size** | ``$([math]::Round((Get-Item `$distApk).Length / 1MB, 2)) MB`` |
+| **Signing Certificate (SHA-256)** | ``82:D5:7A:48:63:A3:CF:34:71:A6:29:3F:BE:CA:C3:AB:8F:44:21:8D:62:EF:28:FD:D2:2F:2E:85:C0:D8:92:8E`` |
 | **Update Compatibility** | 100% verified compatible with all previous CarCast Mirror installs |
 | **Target Android** | Android 8.0 (API 26) through Android 14+ (API 34) |
 
