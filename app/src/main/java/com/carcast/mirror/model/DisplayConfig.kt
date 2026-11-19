@@ -17,10 +17,16 @@ enum class QualityProfile(
     val defaultBitrate: Int,
     val description: String
 ) {
-    AUTO("Auto Quality", 1080, 30, 7_000_000, "Automatically adapts to device and network"),
-    HD("HD (720p @ 30 FPS)", 720, 30, 3_500_000, "Standard 720p HD with low latency"),
-    FULL_HD("Full HD (1080p @ 30 FPS)", 1080, 30, 7_500_000, "Crisp 1080p text and sharp video"),
-    SMOOTH("Smooth (720p @ 60 FPS)", 720, 60, 5_500_000, "High frame rate for fast UI motion")
+    AUTO("Auto Quality", 1080, 30, 8_000_000, "Automatically adapts between 1080p FHD and 720p HD"),
+    HD("HD (720p @ 30 FPS)", 720, 30, 4_500_000, "Standard 720p HD with low latency"),
+    FULL_HD("Full HD (1080p @ 30 FPS)", 1080, 30, 8_500_000, "Crisp 1080p text and razor-sharp video"),
+    SMOOTH("Smooth (720p @ 60 FPS)", 720, 60, 6_000_000, "High 60 FPS frame rate for fast UI motion")
+}
+
+enum class AudioOutputRoute(val displayName: String, val description: String) {
+    CAR_LCD_ONLY("Car LCD Only (Preferred)", "Plays sound through car speakers and mutes phone speakers"),
+    PHONE_ONLY("Phone Only", "Plays sound on phone only; no audio sent to car"),
+    BOTH_DEVICES("Both Devices (Optional)", "Plays sound simultaneously on Car LCD and phone speakers")
 }
 
 data class DisplayConfig(
@@ -33,6 +39,8 @@ data class DisplayConfig(
     val autoStartOnBoot: Boolean = true,
     val keepScreenAwake: Boolean = true,
     val isTouchControlEnabled: Boolean = true,
+    val showPaymentSidePanels: Boolean = false,
+    val audioOutputRoute: AudioOutputRoute = AudioOutputRoute.CAR_LCD_ONLY,
     val gitHubRepo: String = "softwork-05/car-cast-",
     val broadcastName: String = "My Car LCD"
 )

@@ -11,6 +11,7 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.MediaCodec
@@ -30,6 +31,7 @@ import android.view.Display
 import androidx.core.app.NotificationCompat
 import com.carcast.mirror.CarCastApplication
 import com.carcast.mirror.MainActivity
+import com.carcast.mirror.model.AudioOutputRoute
 import com.carcast.mirror.model.QualityProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +66,9 @@ data class SenderState(
     val bytesSent: Long = 0L,
     val reverseTouchActive: Boolean = false,
     val audioCaptureActive: Boolean = false,
+    val audioRoute: String = "Car LCD Only",
+    val audioPacketsSent: Long = 0L,
+    val audioBytesSent: Long = 0L,
     val errorMessage: String? = null
 )
 
@@ -78,6 +83,7 @@ class ScreenCaptureService : Service() {
         const val EXTRA_RESULT_DATA = "extra_result_data"
         const val EXTRA_CAR_IP = "extra_car_ip"
         const val EXTRA_QUALITY_PROFILE = "extra_quality_profile"
+        const val EXTRA_AUDIO_ROUTE = "extra_audio_route"
 
         private val _senderState = MutableStateFlow(SenderState())
         val senderState: StateFlow<SenderState> = _senderState.asStateFlow()
@@ -94,10 +100,13 @@ class ScreenCaptureService : Service() {
     private val isReconfiguring = AtomicBoolean(false)
     private var cachedSpsPps: ByteArray? = null
 
-    // Audio capture
+    // Audio capture & Phone Speaker Suppression
     private var audioRecord: AudioRecord? = null
     private var audioThread: Thread? = null
     private val isAudioActive = AtomicBoolean(false)
+    private var activeAudioRoute: AudioOutputRoute = AudioOutputRoute.CAR_LCD_ONLY
+    private var savedStreamVolume: Int = -1
+    private var isPhoneSpeakerMutedByUs: Boolean = false
 
     // Quality Profile & Adaptive scaling
     private var activeProfile: QualityProfile = QualityProfile.AUTO
@@ -132,6 +141,14 @@ class ScreenCaptureService : Service() {
                     val prefs = getSharedPreferences("carcast_prefs", Context.MODE_PRIVATE)
                     val saved = prefs.getString("quality_profile", QualityProfile.AUTO.name)
                     try { QualityProfile.valueOf(saved ?: QualityProfile.AUTO.name) } catch (_: Exception) { QualityProfile.AUTO }
+                }
+                val audioRouteName = intent.getStringExtra(EXTRA_AUDIO_ROUTE)
+                activeAudioRoute = if (audioRouteName != null) {
+                    try { AudioOutputRoute.valueOf(audioRouteName) } catch (_: Exception) { AudioOutputRoute.CAR_LCD_ONLY }
+                } else {
+                    val prefs = getSharedPreferences("carcast_prefs", Context.MODE_PRIVATE)
+                    val saved = prefs.getString("sender_audio_route", AudioOutputRoute.CAR_LCD_ONLY.name)
+                    try { AudioOutputRoute.valueOf(saved ?: AudioOutputRoute.CAR_LCD_ONLY.name) } catch (_: Exception) { AudioOutputRoute.CAR_LCD_ONLY }
                 }
                 autoDowngraded = false
 
@@ -182,6 +199,7 @@ class ScreenCaptureService : Service() {
             targetPort = targetPort,
             permissionGranted = true,
             qualityProfileName = activeProfile.displayName,
+            audioRoute = activeAudioRoute.displayName,
             reverseTouchActive = CarCastAccessibilityService.isRunning
         )
 
@@ -268,6 +286,15 @@ class ScreenCaptureService : Service() {
     }
 
     private fun startAudioCapture() {
+        if (activeAudioRoute == AudioOutputRoute.PHONE_ONLY) {
+            Log.i(TAG, "Audio output set to PHONE_ONLY. Skipping internal audio capture.")
+            _senderState.value = _senderState.value.copy(
+                audioCaptureActive = false,
+                audioRoute = activeAudioRoute.displayName
+            )
+            return
+        }
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Log.i(TAG, "Internal AudioPlaybackCapture requires Android 10+ (API 29+)")
             return
@@ -277,6 +304,24 @@ class ScreenCaptureService : Service() {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "RECORD_AUDIO permission not granted; internal audio capture skipped")
             return
+        }
+
+        // When CAR_LCD_ONLY is selected, suppress local phone speaker playback
+        if (activeAudioRoute == AudioOutputRoute.CAR_LCD_ONLY) {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                try {
+                    savedStreamVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
+                    if (am.getStreamVolume(AudioManager.STREAM_MUSIC) > 0) {
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                    }
+                    isPhoneSpeakerMutedByUs = true
+                    Log.i(TAG, "Suppressed phone speaker audio (saved original volume: $savedStreamVolume)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not adjust phone speaker volume: ${e.message}")
+                }
+            }
         }
 
         try {
@@ -313,11 +358,18 @@ class ScreenCaptureService : Service() {
             audioRecord = record
             record.startRecording()
             isAudioActive.set(true)
-            _senderState.value = _senderState.value.copy(audioCaptureActive = true)
-            Log.i(TAG, "Internal AudioPlaybackCapture active (44.1kHz Stereo 16-bit PCM)")
+            _senderState.value = _senderState.value.copy(
+                audioCaptureActive = true,
+                audioRoute = activeAudioRoute.displayName
+            )
+            Log.i(TAG, "Internal AudioPlaybackCapture active (44.1kHz Stereo 16-bit PCM, route=${activeAudioRoute.displayName})")
 
             audioThread = Thread({
                 val chunk = ByteArray(2048) // ~23ms chunks for low latency
+                var packetsSent = 0L
+                var bytesSent = 0L
+                var lastDiag = System.currentTimeMillis()
+
                 while (isRunning.get() && !isReconfiguring.get() && isAudioActive.get()) {
                     val read = try {
                         record.read(chunk, 0, chunk.size)
@@ -334,10 +386,22 @@ class ScreenCaptureService : Service() {
                             System.arraycopy(chunk, 0, packet, 2, read)
                             try {
                                 ws.send(packet)
+                                packetsSent++
+                                bytesSent += packet.size
                             } catch (e: Exception) {
                                 break
                             }
                         }
+                    }
+
+                    val now = System.currentTimeMillis()
+                    if (now - lastDiag >= 1000) {
+                        lastDiag = now
+                        _senderState.value = _senderState.value.copy(
+                            audioPacketsSent = packetsSent,
+                            audioBytesSent = bytesSent,
+                            audioCaptureActive = true
+                        )
                     }
                 }
             }, "CarCast_AudioCapture").apply { start() }
@@ -355,6 +419,23 @@ class ScreenCaptureService : Service() {
         } catch (_: Exception) {}
         audioRecord = null
         audioThread = null
+
+        // Restore phone speaker volume if we muted it
+        if (isPhoneSpeakerMutedByUs && savedStreamVolume >= 0) {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                try {
+                    am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, savedStreamVolume, 0)
+                    Log.i(TAG, "Restored phone speaker volume to $savedStreamVolume")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not restore phone speaker volume: ${e.message}")
+                }
+            }
+            isPhoneSpeakerMutedByUs = false
+            savedStreamVolume = -1
+        }
+
         _senderState.value = _senderState.value.copy(audioCaptureActive = false)
     }
 
@@ -401,7 +482,7 @@ class ScreenCaptureService : Service() {
             QualityProfile.AUTO -> {
                 if (autoDowngraded) {
                     Pair(720, 30)
-                } else if (minScreenDim >= 1080 && isEncoderSizeSupported(1080)) {
+                } else if (minScreenDim >= 720) {
                     Pair(1080, 30)
                 } else {
                     Pair(720, 30)
@@ -421,21 +502,26 @@ class ScreenCaptureService : Service() {
     }
 
     private fun calculateEncodingDimensions(screenW: Int, screenH: Int, baseDim: Int): Pair<Int, Int> {
-        val encWidth: Int
-        val encHeight: Int
-        if (screenW <= screenH) {
-            // Portrait mode: fixed width baseDim, height scaled to aspect ratio
-            val targetW = minOf(baseDim, screenW)
-            val rawH = (targetW.toDouble() * screenH / screenW).roundToInt()
-            encWidth = ((targetW + 15) / 16) * 16
-            encHeight = ((rawH + 15) / 16) * 16
-        } else {
-            // Landscape mode: fixed height baseDim, width scaled to aspect ratio
-            val targetH = minOf(baseDim, screenH)
-            val rawW = (targetH.toDouble() * screenW / screenH).roundToInt()
-            encHeight = ((targetH + 15) / 16) * 16
-            encWidth = ((rawW + 15) / 16) * 16
-        }
+        val maxLongDim = if (baseDim >= 1080) 1920 else 1280
+        val maxShortDim = baseDim
+
+        val isPortrait = screenW <= screenH
+        val longScreen = if (isPortrait) screenH else screenW
+        val shortScreen = if (isPortrait) screenW else screenH
+
+        val scale = minOf(
+            maxLongDim.toDouble() / longScreen,
+            maxShortDim.toDouble() / shortScreen,
+            1.0
+        )
+
+        val scaledW = (screenW * scale).roundToInt()
+        val scaledH = (screenH * scale).roundToInt()
+
+        // Align to 16-pixel macroblock boundaries required by hardware AVC encoders
+        val encWidth = ((scaledW + 15) / 16) * 16
+        val encHeight = ((scaledH + 15) / 16) * 16
+
         return Pair(encWidth, encHeight)
     }
 
@@ -512,7 +598,12 @@ class ScreenCaptureService : Service() {
         currentDpi = if (metrics.densityDpi > 0) metrics.densityDpi else DisplayMetrics.DENSITY_DEFAULT
 
         val (baseDim, targetFps) = selectEffectiveBaseDim(activeProfile, currentScreenW, currentScreenH)
-        val targetBitrate = if (baseDim >= 1080) 7_500_000 else if (targetFps >= 60) 5_500_000 else 3_500_000
+        val targetBitrate = when (activeProfile) {
+            QualityProfile.FULL_HD -> 8_500_000
+            QualityProfile.HD -> 4_500_000
+            QualityProfile.SMOOTH -> 6_000_000
+            QualityProfile.AUTO -> if (baseDim >= 1080 && !autoDowngraded) 8_000_000 else 4_500_000
+        }
 
         val (encWidth, encHeight) = calculateEncodingDimensions(currentScreenW, currentScreenH, baseDim)
         currentEncWidth = encWidth
@@ -606,7 +697,12 @@ class ScreenCaptureService : Service() {
         val newDpi = if (metrics.densityDpi > 0) metrics.densityDpi else DisplayMetrics.DENSITY_DEFAULT
 
         val (baseDim, targetFps) = selectEffectiveBaseDim(activeProfile, newScreenW, newScreenH)
-        val targetBitrate = if (baseDim >= 1080) 7_500_000 else if (targetFps >= 60) 5_500_000 else 3_500_000
+        val targetBitrate = when (activeProfile) {
+            QualityProfile.FULL_HD -> 8_500_000
+            QualityProfile.HD -> 4_500_000
+            QualityProfile.SMOOTH -> 6_000_000
+            QualityProfile.AUTO -> if (baseDim >= 1080 && !autoDowngraded) 8_000_000 else 4_500_000
+        }
         val (newEncW, newEncH) = calculateEncodingDimensions(newScreenW, newScreenH, baseDim)
 
         if (force || newEncW != currentEncWidth || newEncH != currentEncHeight) {

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -56,6 +57,9 @@ fun FloatingControlPill(
     onRotateScreen: () -> Unit,
     onToggleMute: () -> Unit,
     onToggleTouch: () -> Unit,
+    canShowSidePanels: Boolean = false,
+    isSidePanelsEnabled: Boolean = false,
+    onToggleSidePanels: (() -> Unit)? = null,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -132,6 +136,16 @@ fun FloatingControlPill(
                 tooltip = if (aspectRatioMode == AspectRatioMode.FIT) "Fit" else "Fill",
                 onClick = onToggleAspectRatio
             )
+
+            // Side Payment QR Panels Toggle (Only visible when side space is available)
+            if (canShowSidePanels && onToggleSidePanels != null) {
+                PillIconButton(
+                    icon = Icons.Default.QrCode,
+                    tooltip = if (isSidePanelsEnabled) "Side QRs: ON" else "Side QRs: OFF",
+                    tint = if (isSidePanelsEnabled) Color(0xFFFF9100) else TextSecondary,
+                    onClick = onToggleSidePanels
+                )
+            }
 
             // Rotate Screen (0 -> 90 -> 180 -> 270)
             PillIconButton(

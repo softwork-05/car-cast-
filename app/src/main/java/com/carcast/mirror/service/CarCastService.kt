@@ -47,6 +47,9 @@ data class AndroidReceiverDiagnostics(
     val renderingStarted: Boolean = false,
     val streamWidth: Int = 1280,
     val streamHeight: Int = 720,
+    val audioPacketsReceived: Long = 0L,
+    val audioBytesReceived: Long = 0L,
+    val audioActive: Boolean = false,
     val lastError: String? = null
 )
 
@@ -70,7 +73,7 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
     private var airplayEngine: AirPlayEngine? = null
     private var androidCastServer: AndroidCastServer? = null
     val videoDecoder = HardwareVideoDecoder()
-    val audioTrack = LowLatencyAudioTrack()
+    val audioTrack by lazy { LowLatencyAudioTrack(this) }
 
     // Observables
     private val _connectionStatus = MutableStateFlow(ConnectionStatus.IDLE)
@@ -282,7 +285,10 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
         _androidDiagnostics.value = _androidDiagnostics.value.copy(
             senderConnected = false,
             decoderInitialized = false,
-            renderingStarted = false
+            renderingStarted = false,
+            audioActive = false,
+            audioPacketsReceived = 0L,
+            audioBytesReceived = 0L
         )
 
         // Ensure AirPlay engine is listening
@@ -401,11 +407,26 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
     }
 
     override fun onAudioFrame(data: ByteArray, offset: Int, length: Int) {
+        if (!audioTrack.isAudioActive) {
+            audioTrack.init()
+        }
         audioTrack.playAudio(data, offset, length)
     }
 
     override fun onAudioData(data: ByteArray, offset: Int, length: Int) {
+        if (!audioTrack.isAudioActive) {
+            audioTrack.init()
+        }
         audioTrack.playAudio(data, offset, length)
+
+        val packets = audioTrack.packetsReceived.get()
+        if (packets == 1L || packets % 50L == 0L) {
+            _androidDiagnostics.value = _androidDiagnostics.value.copy(
+                audioPacketsReceived = packets,
+                audioBytesReceived = audioTrack.bytesReceived.get(),
+                audioActive = true
+            )
+        }
     }
 
     override fun onClientDisconnected() {
@@ -417,7 +438,10 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
             _androidDiagnostics.value = _androidDiagnostics.value.copy(
                 senderConnected = false,
                 decoderInitialized = false,
-                renderingStarted = false
+                renderingStarted = false,
+                audioActive = false,
+                audioPacketsReceived = 0L,
+                audioBytesReceived = 0L
             )
             val port = airplayEngine?.boundPort ?: 7000
             updateNotification("Ready for connections • AirPlay Port $port")

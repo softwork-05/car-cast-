@@ -3,13 +3,28 @@ package com.carcast.mirror.ui.screens
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,11 +37,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.carcast.mirror.R
 import com.carcast.mirror.model.AspectRatioMode
 import com.carcast.mirror.model.ConnectedClient
 import com.carcast.mirror.model.DeviceType
@@ -34,6 +56,8 @@ import com.carcast.mirror.model.DisplayConfig
 import com.carcast.mirror.service.CarCastService
 import com.carcast.mirror.ui.components.FloatingControlPill
 import com.carcast.mirror.ui.theme.ErrorRed
+import com.carcast.mirror.ui.theme.TextPrimary
+import com.carcast.mirror.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 @Composable
@@ -47,6 +71,7 @@ fun MirroringScreen(
 ) {
     var showControls by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    var isPaymentDialogOpen by remember { mutableStateOf(false) }
 
     val streamAspect by service.streamAspectRatio.collectAsState()
     val androidDiag by service.androidDiagnostics.collectAsState()
@@ -75,10 +100,27 @@ fun MirroringScreen(
         val containerHeight = maxHeight.value
         val containerAspect = if (containerHeight > 0f) containerWidth / containerHeight else 1.777f
 
+        val isAirPlay = (client?.deviceType == DeviceType.IOS_AIRPLAY)
+        val isContainerLandscape = containerWidth > containerHeight
+        val isStreamPortrait = (streamAspect > 0.05f && streamAspect < 0.95f)
+
+        // Dynamic space calculation for unused side areas when phone is in portrait on widescreen Car LCD
+        val videoWidth = if (isStreamPortrait && isContainerLandscape) {
+            containerHeight * streamAspect
+        } else {
+            containerWidth
+        }
+        val sideMargin = if (isStreamPortrait && isContainerLandscape && config.aspectRatioMode == AspectRatioMode.FIT) {
+            (containerWidth - videoWidth) / 2f
+        } else 0f
+
+        // Only offer side panels if at least 110 dp of width exists on each side (guaranteeing reliably scannable QRs)
+        val canShowSidePanels = isStreamPortrait && isContainerLandscape && config.aspectRatioMode == AspectRatioMode.FIT && sideMargin >= 110f
+        val shouldDisplaySidePanels = canShowSidePanels && config.showPaymentSidePanels
+
         // --- 1. Video Surface View (Hardware MediaCodec Target & Touch Dispatcher) ---
         // For AirPlay (iOS): Keep SurfaceView full-screen! OpenGL VideoPipeline handles authoritative FIT_CENTER.
         // For Android Cast: MediaCodec renders directly to Surface, so Compose handles aspect ratio sizing.
-        val isAirPlay = (client?.deviceType == DeviceType.IOS_AIRPLAY)
         val surfaceModifier = if (isAirPlay) {
             Modifier.fillMaxSize()
         } else if (streamAspect > 0.05f) {
@@ -165,15 +207,46 @@ fun MirroringScreen(
                     }
                 }
             },
-            modifier = surfaceModifier.graphicsLayer {
-                rotationZ = config.rotationDegrees.toFloat()
-            }
+            modifier = surfaceModifier
+                .align(Alignment.Center)
+                .graphicsLayer {
+                    rotationZ = config.rotationDegrees.toFloat()
+                }
         )
 
-        // --- 2. Floating Auto-Hiding Control Pill (Top Center Edge) ---
+        // --- 2. Intelligent Payment QR Side Panels (Left: NayaPay, Right: Easypaisa) ---
+        // Displayed only when phone is in portrait orientation on landscape Car LCDs with ample side margins.
+        if (shouldDisplaySidePanels) {
+            // LEFT SIDE: NayaPay QR Card
+            PaymentSidePanelCard(
+                title = "NayaPay",
+                subtitle = "mustajab.512@nayapay",
+                accountNo = "PK18NAYA1234503349299961",
+                accentColor = Color(0xFFFF5722),
+                qrDrawableId = R.drawable.qr_nayapay,
+                maxWidthDp = sideMargin - 6f,
+                onClick = { isPaymentDialogOpen = true },
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+
+            // RIGHT SIDE: Easypaisa QR Card
+            PaymentSidePanelCard(
+                title = "easypaisa",
+                subtitle = "MUHAMMAD MUSTAJAB HAIDER",
+                accountNo = "PK22TMFB0000000052413891",
+                accentColor = Color(0xFF00C853),
+                qrDrawableId = R.drawable.qr_easypaisa,
+                maxWidthDp = sideMargin - 6f,
+                onClick = { isPaymentDialogOpen = true },
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+        }
+
+        // --- 3. Floating Auto-Hiding Control Pill (Top Center Edge) ---
         val extraInfo = if (client?.deviceType == DeviceType.ANDROID_CAST) {
             if (androidDiag.framesReceived > 0) {
-                "${androidDiag.streamWidth}x${androidDiag.streamHeight} • ${androidDiag.fps} FPS"
+                val audioText = if (androidDiag.audioActive) " • Audio OK" else ""
+                "${androidDiag.streamWidth}x${androidDiag.streamHeight} • ${androidDiag.fps} FPS$audioText"
             } else {
                 "Waiting for video frames..."
             }
@@ -187,6 +260,12 @@ fun MirroringScreen(
             isTouchSupported = (client?.deviceType != DeviceType.IOS_AIRPLAY),
             clientName = client?.deviceName ?: "Connected Device",
             extraInfo = extraInfo,
+            canShowSidePanels = canShowSidePanels,
+            isSidePanelsEnabled = config.showPaymentSidePanels,
+            onToggleSidePanels = {
+                onUpdateConfig(config.copy(showPaymentSidePanels = !config.showPaymentSidePanels))
+                lastInteractionTime = System.currentTimeMillis()
+            },
             onToggleAspectRatio = {
                 val nextMode = if (config.aspectRatioMode == AspectRatioMode.FIT) AspectRatioMode.FILL else AspectRatioMode.FIT
                 onUpdateConfig(config.copy(aspectRatioMode = nextMode))
@@ -225,6 +304,133 @@ fun MirroringScreen(
                     text = "Decoder Error: ${androidDiag.lastError}",
                     color = Color.White,
                     fontSize = 12.sp
+                )
+            }
+        }
+
+        // Full-screen Payment Dialog if user taps on either side panel
+        if (isPaymentDialogOpen) {
+            PaymentDialog(onDismiss = { isPaymentDialogOpen = false })
+        }
+    }
+}
+
+@Composable
+private fun PaymentSidePanelCard(
+    title: String,
+    subtitle: String,
+    accountNo: String,
+    accentColor: Color,
+    qrDrawableId: Int,
+    maxWidthDp: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .widthIn(max = maxWidthDp.dp)
+            .padding(horizontal = 6.dp, vertical = 12.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xE60D121D))
+            .border(
+                1.5.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        accentColor.copy(alpha = 0.85f),
+                        accentColor.copy(alpha = 0.35f),
+                        Color(0xFF1E293B)
+                    )
+                ),
+                RoundedCornerShape(16.dp)
+            )
+            .clickable { onClick() }
+            .padding(10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Header Badge
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accentColor.copy(alpha = 0.15f))
+                    .border(1.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        color = accentColor,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.5.sp,
+                        fontSize = 12.sp
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // White square container holding exact original QR code
+            Box(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = qrDrawableId),
+                    contentDescription = "$title Payment QR",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Account details footer
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = accountNo,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = accentColor,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 9.sp,
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Tap to enlarge",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = TextSecondary,
+                        fontSize = 8.sp,
+                        textAlign = TextAlign.Center
+                    )
                 )
             }
         }

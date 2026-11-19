@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.carcast.mirror.engine.update.AutoUpdateWorker
 import com.carcast.mirror.model.AspectRatioMode
+import com.carcast.mirror.model.AudioOutputRoute
 import com.carcast.mirror.model.DisplayConfig
 import com.carcast.mirror.model.QualityProfile
 import com.carcast.mirror.model.StreamResolution
@@ -83,6 +84,8 @@ fun SettingsDialog(
 
     var selectedAspect by remember { mutableStateOf(config.aspectRatioMode) }
     var selectedQuality by remember { mutableStateOf(config.qualityProfile) }
+    var showSidePanels by remember { mutableStateOf(config.showPaymentSidePanels) }
+    var selectedAudioRoute by remember { mutableStateOf(config.audioOutputRoute) }
     var audioVol by remember { mutableFloatStateOf(config.audioVolume) }
     var autoBoot by remember { mutableStateOf(config.autoStartOnBoot) }
     var touchControl by remember { mutableStateOf(config.isTouchControlEnabled) }
@@ -286,6 +289,58 @@ fun SettingsDialog(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Show Payment QR Side Panels Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("Show Payment QR Side Panels", color = TextPrimary, fontSize = 14.sp)
+                        Text(
+                            "When phone is mirrored in portrait on widescreen Car LCD, displays NayaPay & Easypaisa QR codes in unused side areas (Parked only).",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Switch(
+                        checked = showSidePanels,
+                        onCheckedChange = { showSidePanels = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = ObsidianBg, checkedTrackColor = ElectricCyan)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Audio Output Routing
+                Text(
+                    text = "Audio Output Route:",
+                    style = MaterialTheme.typography.labelLarge.copy(color = ElectricCyan)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AudioOutputRoute.values().forEach { route ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedAudioRoute = route }
+                        ) {
+                            RadioButton(
+                                selected = selectedAudioRoute == route,
+                                onClick = { selectedAudioRoute = route },
+                                colors = RadioButtonDefaults.colors(selectedColor = ElectricCyan)
+                            )
+                            Column {
+                                Text(route.displayName, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(route.description, color = TextSecondary, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // --- DEDICATED APP UPDATES SECTION ---
@@ -424,6 +479,8 @@ fun SettingsDialog(
                                     isTouchControlEnabled = touchControl,
                                     aspectRatioMode = selectedAspect,
                                     qualityProfile = selectedQuality,
+                                    showPaymentSidePanels = showSidePanels,
+                                    audioOutputRoute = selectedAudioRoute,
                                     audioVolume = audioVol,
                                     autoStartOnBoot = autoBoot
                                 )

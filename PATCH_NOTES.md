@@ -1,5 +1,15 @@
 # CarCastMirror Release Notes & Verification History
 
+## Version 1.0.9 (Build 9) — 19 November 2026
+- **Payment QR Side Panels**: Intelligently displays NayaPay (Left) and Easypaisa (Right) QR codes in unused pillarbox margins when mirroring portrait phones on widescreen Car LCDs, maintaining exact aspect ratios, pixel-perfect reverse-touch mapping, and zero overlay interference. Features on-screen toggle in the floating control pill and in Settings (default OFF).
+- **Direct Internal Audio Output to Car LCD**: Dedicated low-latency `AudioTrack` with automotive `AudioFocus` request, jitter-free buffer queue, and user-configurable **Audio Output** route (**Car LCD Only**, **Phone Only**, **Both Devices**). In "Car LCD Only" mode, phone media volume is suppressed while streaming and automatically restored upon disconnect.
+- **Full HD Quality Streaming**: Redesigned dimension calculations to fit within 1920x1080 bounds preserving phone aspect ratio without exceeding hardware encoder Level 4.2 macroblock limits. Full HD streams at 8.5 Mbps / 30 FPS, HD at 4.5 Mbps / 30 FPS, and Smooth at 6.0 Mbps / 60 FPS.
+- **Fully Responsive UI**: Jetpack Compose layouts dynamically adapt across small 16:9 car screens (800x480, 1024x600), ultra-widescreens (21:9, 24:9), tablets, and phones with scroll management and zero clipping.
+- **Live Diagnostics**: Added real-time tracking of audio packets sent/received, bytes transferred, output route status, encoder resolution, frame rates, and dropped frames.
+- **Security & Update Compatibility**: Signed with official key matching SHA-256 certificate `82:D5:7A:48:63:A3:CF:34:71:A6:29:3F:BE:CA:C3:AB:8F:44:21:8D:62:EF:28:FD:D2:2F:2E:85:C0:D8:92:8E`.
+
+---
+
 ## Version 1.0.8 (Build 8) — 18 November 2026
 - **Scan to Pay**: Integrated full-screen payment modal on Receiver screen with crisp, responsive NayaPay (Orange) and Easypaisa (Green) QR codes for car displays and phones.
 - **Embedded Permanent QR Assets**: Included lossless, pixel-perfect, local PNG QR codes for Muhammad Mustajab Haider (`mustajab.512@nayapay` / `PK18NAYA1234503349299961` and Easypaisa / `PK22TMFB0000000052413891`). Both QR codes decode with 100% accuracy using ZXing standard.

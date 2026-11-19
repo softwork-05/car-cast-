@@ -28,9 +28,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.carcast.mirror.model.AudioOutputRoute
 import com.carcast.mirror.model.QualityProfile
 import com.carcast.mirror.service.CarCastAccessibilityService
 import com.carcast.mirror.service.ScreenCaptureService
@@ -94,6 +97,17 @@ fun MobileSenderScreen(
         )
     }
 
+    val savedRouteName = remember { prefs.getString("sender_audio_route", AudioOutputRoute.CAR_LCD_ONLY.name) ?: AudioOutputRoute.CAR_LCD_ONLY.name }
+    var selectedAudioRoute by remember {
+        mutableStateOf(
+            try {
+                AudioOutputRoute.valueOf(savedRouteName)
+            } catch (_: Exception) {
+                AudioOutputRoute.CAR_LCD_ONLY
+            }
+        )
+    }
+
     val isBroadcasting = senderState.status == SenderStatus.STREAMING ||
             senderState.status == SenderStatus.CONNECTING ||
             senderState.status == SenderStatus.CONNECTED ||
@@ -107,6 +121,7 @@ fun MobileSenderScreen(
             prefs.edit()
                 .putString("last_target_ip", cleanIp)
                 .putString("sender_quality_profile", selectedProfile.name)
+                .putString("sender_audio_route", selectedAudioRoute.name)
                 .apply()
 
             val serviceIntent = Intent(context, ScreenCaptureService::class.java).apply {
@@ -115,6 +130,7 @@ fun MobileSenderScreen(
                 putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, result.data)
                 putExtra(ScreenCaptureService.EXTRA_CAR_IP, cleanIp)
                 putExtra(ScreenCaptureService.EXTRA_QUALITY_PROFILE, selectedProfile.name)
+                putExtra(ScreenCaptureService.EXTRA_AUDIO_ROUTE, selectedAudioRoute.name)
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(serviceIntent)
@@ -137,16 +153,21 @@ fun MobileSenderScreen(
         if (cleanIp.isNotBlank()) {
             prefs.edit().putString("last_target_ip", cleanIp).apply()
 
-            val hasAudioPerm = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (!hasAudioPerm) {
-                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            } else {
+            if (selectedAudioRoute == AudioOutputRoute.PHONE_ONLY) {
                 val projMgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                 projectionLauncher.launch(projMgr.createScreenCaptureIntent())
+            } else {
+                val hasAudioPerm = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (!hasAudioPerm) {
+                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                } else {
+                    val projMgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    projectionLauncher.launch(projMgr.createScreenCaptureIntent())
+                }
             }
         }
     }
@@ -328,6 +349,74 @@ fun MobileSenderScreen(
                 }
             }
 
+            // Audio Output Route Selector Chips
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Audio Output Route:",
+                    color = ElectricCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AudioOutputRoute.values().forEach { route ->
+                        FilterChip(
+                            selected = selectedAudioRoute == route,
+                            onClick = {
+                                if (!isBroadcasting) {
+                                    selectedAudioRoute = route
+                                    prefs.edit().putString("sender_audio_route", route.name).apply()
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = when (route) {
+                                        AudioOutputRoute.CAR_LCD_ONLY -> Icons.Default.DirectionsCar
+                                        AudioOutputRoute.PHONE_ONLY -> Icons.Default.PhoneAndroid
+                                        AudioOutputRoute.BOTH_DEVICES -> Icons.AutoMirrored.Filled.VolumeUp
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = when (route) {
+                                        AudioOutputRoute.CAR_LCD_ONLY -> "Car LCD Only"
+                                        AudioOutputRoute.PHONE_ONLY -> "Phone Only"
+                                        AudioOutputRoute.BOTH_DEVICES -> "Both Devices"
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selectedAudioRoute == route) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = ElectricCyan,
+                                selectedLabelColor = ObsidianBg,
+                                containerColor = Color(0xFF21262D),
+                                labelColor = TextPrimary
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = selectedAudioRoute == route,
+                                borderColor = if (selectedAudioRoute == route) ElectricCyan else CardBorder
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = selectedAudioRoute.description,
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp
+                )
+            }
+
             // Live Diagnostics Card
             Column(
                 modifier = Modifier
@@ -358,6 +447,12 @@ fun MobileSenderScreen(
                 )
 
                 DiagnosticRow(
+                    label = "Audio Output Route:",
+                    value = senderState.audioRoute,
+                    valueColor = NeonGreen
+                )
+
+                DiagnosticRow(
                     label = "Hardware Encoder:",
                     value = if (senderState.encoderActive) "${senderState.resolution} (H.264)" else "Idle",
                     valueColor = if (senderState.encoderActive) NeonGreen else TextSecondary
@@ -382,8 +477,10 @@ fun MobileSenderScreen(
                 )
 
                 DiagnosticRow(
-                    label = "Internal Audio Mirroring:",
-                    value = if (senderState.audioCaptureActive) "Active • 44.1kHz PCM (Internal)" else "Muted / Inactive",
+                    label = "Internal Audio Stream:",
+                    value = if (senderState.audioCaptureActive) "Active • ${senderState.audioPacketsSent} pkts (${senderState.audioBytesSent / 1024} KB sent)"
+                    else if (senderState.audioRoute.contains("Phone Only")) "Phone Only (No Car Audio)"
+                    else "Muted / Inactive",
                     valueColor = if (senderState.audioCaptureActive) NeonGreen else TextSecondary
                 )
 
