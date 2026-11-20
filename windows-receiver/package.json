@@ -1,16 +1,23 @@
 {
-  "name": "windows-receiver",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "carcast-mirror-windows",
+  "version": "1.0.13",
+  "description": "CarCast Mirror Windows Desktop Receiver",
+  "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "electron ."
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "carcast",
+    "screen-mirroring",
+    "airplay",
+    "android"
+  ],
+  "author": "CarCast Team",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "electron": "^24.22.3"
   }
 }

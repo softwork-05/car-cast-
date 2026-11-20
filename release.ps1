@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     CarCast Mirror - Automated Release & GitHub Direct Publisher
 
@@ -197,7 +197,13 @@ if ($DirectPublish) {
     # Package Windows Receiver into a clean standalone zip distribution
     $winReceiverDir = Join-Path $ProjectRoot "windows-receiver"
     $distWinZip = Join-Path $DistDir "CarCastMirror-Windows-Receiver-$ReleaseTag.zip"
-    if (Test-Path $winReceiverDir) {
+    $winAppDir = "D:\Projects\CarCastMirror\CarCastMirror-Windows-App"
+    if (Test-Path $winAppDir) {
+        Write-Host "Packaging Standalone Windows Desktop App distribution..." -ForegroundColor Cyan
+        if (Test-Path $distWinZip) { Remove-Item $distWinZip -Force }
+        Compress-Archive -Path "$winAppDir\*" -DestinationPath $distWinZip -Force
+        Write-Host "Windows Desktop App packaged: $distWinZip" -ForegroundColor Green
+    } elseif (Test-Path $winReceiverDir) {
         Write-Host "Packaging Windows Receiver distribution..." -ForegroundColor Cyan
         if (Test-Path $distWinZip) { Remove-Item $distWinZip -Force }
         $tempPackDir = Join-Path $env:TEMP "CarCastMirror-WinPack"
