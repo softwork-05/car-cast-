@@ -247,6 +247,8 @@ class ScreenCaptureService : Service() {
                     if (message == null) return
                     if (message.contains("request_keyframe")) {
                         requestKeyframeFromCodec()
+                    } else if (message.contains("\"type\":\"key\"") || message.contains("type_text") || message.contains("\"action\":\"back\"") || message.contains("\"action\":\"home\"")) {
+                        handleIncomingKeyEvent(message)
                     } else if (message.contains("touch")) {
                         handleIncomingTouchEvent(message)
                     }
@@ -458,6 +460,25 @@ class ScreenCaptureService : Service() {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse incoming touch JSON: ${e.message}")
+        }
+    }
+
+    private fun handleIncomingKeyEvent(message: String) {
+        try {
+            val json = JSONObject(message)
+            val action = json.optString("action", "")
+            val text = json.optString("text", "")
+            if (action.isEmpty()) return
+
+            val a11y = CarCastAccessibilityService.instance
+            if (a11y != null) {
+                a11y.performKeyAction(action, text, currentScreenW, currentScreenH)
+                Log.d(TAG, "[KEY:RECV] Handled key action=$action text='$text'")
+            } else {
+                Log.w(TAG, "[KEY:RECV] Key action received but CarCastAccessibilityService is not enabled in Android settings")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse incoming key JSON: ${e.message}")
         }
     }
 

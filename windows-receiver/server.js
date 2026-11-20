@@ -172,15 +172,17 @@ viewerWss.on('connection', (ws) => {
         } catch (_) {}
     }
 
-    // Handle reverse touch/mouse events and keyframe requests from PC screen and forward to phone
+    // Handle reverse touch/mouse events, keyboard events and keyframe requests from PC screen and forward to phone
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message.toString());
             if (activeSenderSocket && activeSenderSocket.readyState === WebSocket.OPEN) {
-                if (data.type === 'touch' || data.type === 'request_keyframe') {
+                if (data.type === 'touch' || data.type === 'key' || data.type === 'request_keyframe') {
                     activeSenderSocket.send(JSON.stringify(data));
                     if (data.type === 'touch' && (data.action === 'down' || data.action === 'up')) {
                         console.log(`[TOUCH:PC] Injected ${data.action} at (${data.x.toFixed(3)}, ${data.y.toFixed(3)}) -> Phone`);
+                    } else if (data.type === 'key') {
+                        console.log(`[KEY:PC] Injected action=${data.action} text='${data.text || ''}' -> Phone`);
                     }
                 }
             }

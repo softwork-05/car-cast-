@@ -216,6 +216,94 @@
         }
         .hud b { color: #00E5FF; }
         .hud span { color: #39D353; font-weight: bold; }
+
+        /* Bottom Navigation & Keyboard Input Bar */
+        .bottombar {
+            height: 48px;
+            background: #161B22;
+            border-top: 1px solid #30363D;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            z-index: 100;
+            gap: 12px;
+        }
+        .nav-cluster {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .nav-btn {
+            background: #21262D;
+            border: 1px solid #30363D;
+            color: #F0F6FC;
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .nav-btn:hover {
+            background: #30363D;
+            border-color: #00E5FF;
+            color: #00E5FF;
+        }
+        .nav-btn:active {
+            transform: scale(0.96);
+        }
+        .keyboard-input-wrap {
+            flex: 1;
+            max-width: 520px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .quick-input {
+            flex: 1;
+            height: 32px;
+            background: #0D1117;
+            border: 1px solid #30363D;
+            border-radius: 8px;
+            padding: 0 12px;
+            color: #F0F6FC;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .quick-input:focus {
+            border-color: #00E5FF;
+            box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.2);
+        }
+        .send-btn {
+            height: 32px;
+            background: rgba(0, 229, 255, 0.15);
+            border: 1px solid #00E5FF;
+            color: #00E5FF;
+            padding: 0 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .send-btn:hover {
+            background: #00E5FF;
+            color: #0D1117;
+        }
+        .keyboard-hint {
+            font-size: 11px;
+            color: #8B949E;
+            white-space: nowrap;
+        }
+        .keyboard-hint span {
+            color: #58A6FF;
+        }
     </style>
 </head>
 <body>
@@ -260,7 +348,25 @@
             <div>Res: <b id="hudRes">Waiting</b></div>
             <div>FPS: <span id="hudFps">0</span></div>
             <div>Frames: <b id="hudFrames">0</b></div>
-            <div>Touch: <span>Active</span></div>
+            <div>Touch/Key: <span>Active</span></div>
+        </div>
+    </div>
+
+    <!-- Bottom Android Navigation & Keyboard Input Bar -->
+    <div class="bottombar" id="bottombar">
+        <div class="nav-cluster">
+            <button id="btnNavBack" class="nav-btn" title="Back (Esc / Alt+Left)">◀ Back</button>
+            <button id="btnNavHome" class="nav-btn" title="Home (Home / F1)">● Home</button>
+            <button id="btnNavRecents" class="nav-btn" title="Recent Apps (F2 / Tab)">■ Recents</button>
+        </div>
+
+        <div class="keyboard-input-wrap">
+            <input type="text" id="quickTextInput" class="quick-input" placeholder="Type on PC & press Enter (or type directly anywhere)..." autocomplete="off" />
+            <button id="btnQuickSend" class="send-btn" title="Send Text to Phone">Send ↵</button>
+        </div>
+
+        <div class="keyboard-hint">
+            ⌨️ <span>Esc=Back | F1=Home | F2=Recents | Keyboard Active</span>
         </div>
     </div>
 
@@ -276,6 +382,11 @@
         const btnAspect = document.getElementById('btnAspect');
         const btnAudio = document.getElementById('btnAudio');
         const btnFullscreen = document.getElementById('btnFullscreen');
+        const btnNavBack = document.getElementById('btnNavBack');
+        const btnNavHome = document.getElementById('btnNavHome');
+        const btnNavRecents = document.getElementById('btnNavRecents');
+        const quickTextInput = document.getElementById('quickTextInput');
+        const btnQuickSend = document.getElementById('btnQuickSend');
 
         let isFitMode = true;
         let isAudioMuted = false;
@@ -605,10 +716,94 @@
             }
         });
 
+        // 6. PC Keyboard & Navigation Controls for Android
+        function sendKeyAction(action, text = '') {
+            if (!viewerWs || viewerWs.readyState !== WebSocket.OPEN) return;
+            const keyPayload = {
+                type: 'key',
+                action: action.toLowerCase(),
+                text: text || '',
+                time: Date.now()
+            };
+            viewerWs.send(JSON.stringify(keyPayload));
+            console.log('[KEY:SENT]', keyPayload);
+            const hudSpan = document.querySelector('#hud div:last-child span');
+            if (hudSpan) {
+                hudSpan.textContent = `Key: ${action.toUpperCase()}${text ? ' ("' + text + '")' : ''}`;
+            }
+        }
+
+        btnNavBack.addEventListener('click', () => sendKeyAction('back'));
+        btnNavHome.addEventListener('click', () => sendKeyAction('home'));
+        btnNavRecents.addEventListener('click', () => sendKeyAction('recents'));
+
+        function sendQuickInputText() {
+            const val = quickTextInput.value;
+            if (val) {
+                sendKeyAction('type_text', val);
+                quickTextInput.value = '';
+            }
+        }
+
+        btnQuickSend.addEventListener('click', sendQuickInputText);
+        quickTextInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendQuickInputText();
+            }
+        });
+
+        // Global Physical Keyboard Listener
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'F11' || e.key === 'f') {
+            // If user is actively typing in the quick input box, let typing work normally
+            if (document.activeElement === quickTextInput) {
+                if (e.key === 'Escape') {
+                    quickTextInput.blur();
+                }
+                return;
+            }
+
+            // Fullscreen shortcut
+            if (e.key === 'F11' || (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.altKey && !e.metaKey)) {
                 e.preventDefault();
                 btnFullscreen.click();
+                return;
+            }
+
+            // Android System Navigation Shortcuts
+            if (e.key === 'Escape' || (e.altKey && e.key === 'ArrowLeft') || e.key === 'BrowserBack') {
+                e.preventDefault();
+                sendKeyAction('back');
+                return;
+            }
+            if (e.key === 'Home' || e.key === 'F1' || e.key === 'BrowserHome') {
+                e.preventDefault();
+                sendKeyAction('home');
+                return;
+            }
+            if (e.key === 'F2' || (e.altKey && e.key === 'Tab')) {
+                e.preventDefault();
+                sendKeyAction('recents');
+                return;
+            }
+
+            // Text editing shortcuts
+            if (e.key === 'Backspace') {
+                e.preventDefault();
+                sendKeyAction('backspace');
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendKeyAction('enter');
+                return;
+            }
+
+            // Printable characters (A-Z, 0-9, space, punctuation)
+            if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                e.preventDefault();
+                sendKeyAction('type_text', e.key);
+                return;
             }
         });
     </script>

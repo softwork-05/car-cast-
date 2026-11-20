@@ -5,10 +5,12 @@ import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
 import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import java.util.Locale
 import kotlin.math.hypot
 
@@ -149,6 +151,69 @@ class CarCastAccessibilityService : AccessibilityService() {
                 }
                 else -> {
                     // Ignore unrecognized actions
+                }
+            }
+        }
+    }
+
+    fun performKeyAction(action: String, text: String? = null, screenW: Int = 1080, screenH: Int = 1920) {
+        val act = action.lowercase(Locale.ROOT)
+        Log.i(TAG, "[KEY:ACTION] Performing keyboard action: $act (text=${text ?: "none"})")
+
+        when (act) {
+            "back" -> {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            "home" -> {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+            "recents" -> {
+                performGlobalAction(GLOBAL_ACTION_RECENTS)
+            }
+            "notifications" -> {
+                performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+            }
+            "type_text", "paste", "char" -> {
+                if (!text.isNullOrEmpty()) {
+                    val root = rootInActiveWindow
+                    val focused = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                    if (focused != null) {
+                        val current = focused.text?.toString() ?: ""
+                        val updated = current + text
+                        val args = Bundle().apply {
+                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
+                        }
+                        focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                        Log.d(TAG, "[KEY:TYPED] Injected text '$text' into focused input field")
+                    } else {
+                        Log.d(TAG, "[KEY:TYPED] No focused input field found on phone screen")
+                    }
+                }
+            }
+            "backspace" -> {
+                val root = rootInActiveWindow
+                val focused = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                if (focused != null) {
+                    val current = focused.text?.toString() ?: ""
+                    if (current.isNotEmpty()) {
+                        val updated = current.dropLast(1)
+                        val args = Bundle().apply {
+                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
+                        }
+                        focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                        Log.d(TAG, "[KEY:BACKSPACE] Deleted character from focused input field")
+                    }
+                }
+            }
+            "enter" -> {
+                val root = rootInActiveWindow
+                val focused = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                val handled = focused?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+                if (!handled) {
+                    // Tap bottom-right area where soft keyboard Enter/Search/Send key is located
+                    performTouchGesture("down", 0.90f, 0.95f, screenW, screenH)
+                    performTouchGesture("up", 0.90f, 0.95f, screenW, screenH)
+                    Log.d(TAG, "[KEY:ENTER] Dispatched Enter tap at bottom-right keyboard area")
                 }
             }
         }

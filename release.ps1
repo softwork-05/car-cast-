@@ -203,6 +203,7 @@ if ($DirectPublish) {
         $tempPackDir = Join-Path $env:TEMP "CarCastMirror-WinPack"
         if (Test-Path $tempPackDir) { Remove-Item $tempPackDir -Recurse -Force }
         New-Item -ItemType Directory -Path $tempPackDir | Out-Null
+        Copy-Item (Join-Path $winReceiverDir "CarCastMirror.exe") $tempPackDir -Force
         Copy-Item (Join-Path $winReceiverDir "server.js") $tempPackDir -Force
         Copy-Item (Join-Path $winReceiverDir "package.json") $tempPackDir -Force
         Copy-Item (Join-Path $winReceiverDir "run-windows-receiver.bat") $tempPackDir -Force
@@ -321,6 +322,10 @@ SHA-256: $apkHash  CarCastMirror.apk
     )
     if ($distWinZip -and (Test-Path $distWinZip)) {
         $uploadAssets += "$distWinZip#CarCastMirror-Windows-Receiver-$ReleaseTag.zip"
+    }
+    $winExePath = Join-Path $winReceiverDir "CarCastMirror.exe"
+    if (Test-Path $winExePath) {
+        $uploadAssets += "$winExePath#CarCastMirror.exe"
     }
 
     if ($releaseExists) {
