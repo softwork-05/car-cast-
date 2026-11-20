@@ -36,6 +36,7 @@ import com.carcast.mirror.model.QualityProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONObject
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
@@ -246,7 +247,7 @@ class ScreenCaptureService : Service() {
                     if (message == null) return
                     if (message.contains("request_keyframe")) {
                         requestKeyframeFromCodec()
-                    } else if (message.contains("\"type\":\"touch\"")) {
+                    } else if (message.contains("touch")) {
                         handleIncomingTouchEvent(message)
                     }
                 }
@@ -441,20 +442,19 @@ class ScreenCaptureService : Service() {
 
     private fun handleIncomingTouchEvent(message: String) {
         try {
-            val actionMatch = Regex(""""action"\s*:\s*"(\w+)"""").find(message)
-            val xMatch = Regex(""""x"\s*:\s*([0-9.]+)""").find(message)
-            val yMatch = Regex(""""y"\s*:\s*([0-9.]+)""").find(message)
+            val json = JSONObject(message)
+            val action = json.optString("action", "")
+            val xRatio = json.optDouble("x", -1.0).toFloat()
+            val yRatio = json.optDouble("y", -1.0).toFloat()
 
-            val action = actionMatch?.groupValues?.getOrNull(1) ?: return
-            val xRatio = xMatch?.groupValues?.getOrNull(1)?.toFloatOrNull() ?: return
-            val yRatio = yMatch?.groupValues?.getOrNull(1)?.toFloatOrNull() ?: return
+            if (action.isEmpty() || xRatio < 0f || yRatio < 0f) return
 
             val a11y = CarCastAccessibilityService.instance
             if (a11y != null) {
                 a11y.performTouchGesture(action, xRatio, yRatio, currentScreenW, currentScreenH)
                 Log.d(TAG, "[TOUCH:RECV] Dispatched action=$action x=$xRatio y=$yRatio to AccessibilityService")
             } else {
-                Log.w(TAG, "[TOUCH:RECV] Touch received but CarCastAccessibilityService is not enabled")
+                Log.w(TAG, "[TOUCH:RECV] Touch received ($action at $xRatio, $yRatio) but CarCastAccessibilityService is not running / enabled in Android settings")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse incoming touch JSON: ${e.message}")

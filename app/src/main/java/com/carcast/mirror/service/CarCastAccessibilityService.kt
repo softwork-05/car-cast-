@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import java.util.Locale
 import kotlin.math.hypot
 
 class CarCastAccessibilityService : AccessibilityService() {
@@ -69,7 +70,7 @@ class CarCastAccessibilityService : AccessibilityService() {
         val pxY = (yRatio * screenH).coerceIn(0f, screenH.toFloat())
 
         synchronized(gestureLock) {
-            when (action) {
+            when (action.lowercase(Locale.ROOT)) {
                 "down" -> {
                     touchDownX = pxX
                     touchDownY = pxY
@@ -82,6 +83,11 @@ class CarCastAccessibilityService : AccessibilityService() {
                 }
                 "up" -> {
                     val upTime = SystemClock.uptimeMillis()
+                    if (touchDownTime == 0L) {
+                        touchDownX = pxX
+                        touchDownY = pxY
+                        touchDownTime = upTime - 50L
+                    }
                     val duration = (upTime - touchDownTime).coerceAtLeast(10L)
                     val dx = pxX - touchDownX
                     val dy = pxY - touchDownY
@@ -97,10 +103,12 @@ class CarCastAccessibilityService : AccessibilityService() {
                         // 1. Single Tap
                         gestureType = "TAP"
                         gestureDuration = 50L
+                        path.lineTo(touchDownX + 1f, touchDownY + 1f)
                     } else if (distance < 25f && duration >= 400L) {
                         // 2. Long Press
                         gestureType = "LONG_PRESS"
                         gestureDuration = 650L
+                        path.lineTo(touchDownX + 1f, touchDownY + 1f)
                     } else {
                         // 3. Swipe / Scroll / Drag
                         gestureType = "SWIPE_OR_DRAG"
@@ -133,6 +141,7 @@ class CarCastAccessibilityService : AccessibilityService() {
                         Log.e(TAG, "Failed to dispatch touch gesture", e)
                     } finally {
                         touchPathPoints.clear()
+                        touchDownTime = 0L
                     }
                 }
                 "cancel" -> {

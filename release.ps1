@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     CarCast Mirror - Automated Release & GitHub Direct Publisher
 

@@ -341,18 +341,25 @@
                 },
                 error: (e) => {
                     console.error('WebCodecs VideoDecoder error:', e);
+                    // Request keyframe on decode error
+                    requestKeyframeFromSender();
                 }
             });
 
-            // Configure H.264 Baseline/High Profile (avc1.64002a = High Profile Level 4.2)
-            try {
-                videoDecoder.configure({
-                    codec: 'avc1.42E01E', // Baseline fallback or avc1.64002a
-                    optimizeForLatency: true
-                });
-                isDecoderConfigured = true;
-            } catch (err) {
-                console.warn('Decoder config failed with default codec:', err);
+            // Configure H.264 High/Main/Baseline Profile
+            const codecsToTry = ['avc1.64002a', 'avc1.4d4028', 'avc1.42e01e'];
+            for (const c of codecsToTry) {
+                try {
+                    videoDecoder.configure({
+                        codec: c,
+                        optimizeForLatency: true
+                    });
+                    isDecoderConfigured = true;
+                    console.log(`[DECODER] Configured WebCodecs with codec: ${c}`);
+                    break;
+                } catch (err) {
+                    console.warn(`[DECODER] Codec ${c} rejected:`, err);
+                }
             }
         }
 
@@ -362,6 +369,20 @@
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${wsProtocol}//${window.location.host}/viewer`;
         let viewerWs = null;
+        let hasReceivedFirstKeyframe = false;
+        let lastKeyframeRequestTime = 0;
+        let streamTimestampUs = 0;
+
+        function requestKeyframeFromSender() {
+            const now = performance.now();
+            if (now - lastKeyframeRequestTime > 800) {
+                lastKeyframeRequestTime = now;
+                if (viewerWs && viewerWs.readyState === WebSocket.OPEN) {
+                    viewerWs.send(JSON.stringify({ type: 'request_keyframe' }));
+                    console.log('[VIEWER] Requested IDR keyframe from phone');
+                }
+            }
+        }
 
         function connectViewerWs() {
             viewerWs = new WebSocket(wsUrl);
@@ -369,6 +390,7 @@
 
             viewerWs.onopen = () => {
                 console.log('Connected to CarCast local viewer stream.');
+                requestKeyframeFromSender();
             };
 
             viewerWs.onmessage = (event) => {
@@ -377,48 +399,60 @@
                     try {
                         const msg = JSON.parse(event.data);
                         if (msg.type === 'status') {
-                            if (!msg.connected) {
+                            if (msg.connected) {
+                                statusBadge.classList.add('online');
+                                statusText.textContent = 'RECEIVING STREAM';
+                                requestKeyframeFromSender();
+                            } else {
                                 standbyOverlay.style.display = 'flex';
                                 statusBadge.classList.remove('online');
                                 statusText.textContent = 'WAITING FOR SENDER';
                                 hudFps.textContent = '0';
+                                hasReceivedFirstKeyframe = false;
                             }
                         } else if (msg.type === 'meta') {
                             streamWidth = msg.width || streamWidth;
                             streamHeight = msg.height || streamHeight;
                             hudRes.textContent = `${streamWidth}x${streamHeight}`;
+                            requestKeyframeFromSender();
                         }
                     } catch (_) {}
                 } else {
                     // Binary Video / Audio Frame
                     const buffer = event.data;
-                    const view = new DataView(buffer);
                     if (buffer.byteLength < 4) return;
+                    const uint8 = new Uint8Array(buffer);
 
-                    // Audio packet identifier: first byte is 0x02
-                    const firstByte = view.getUint8(0);
-                    if (firstByte === 0x02) {
-                        playPcmAudio(buffer);
+                    // 1. Audio Check ("AU" prefix in bytes 0 and 1)
+                    if (uint8[0] === 0x41 && uint8[1] === 0x55) { // 'A', 'U'
+                        playPcmAudio(buffer.slice(2));
                         return;
                     }
 
-                    // Video Frame: H.264 NAL Unit
+                    // 2. Video Frame: RAW H.264 Annex-B NAL Unit (contains 00 00 00 01 start code)
                     if (videoDecoder && videoDecoder.state === 'configured') {
-                        try {
-                            // Extract PTS (8 bytes at offset 0 if sender sends PTS header)
-                            // or feed NALU directly as EncodedVideoChunk
-                            const chunkData = new Uint8Array(buffer, 8); // Skip 8-byte PTS header
-                            const ptsUs = view.getBigInt64(0, false);
+                        const isKey = isH264Keyframe(uint8);
+                        if (isKey) {
+                            hasReceivedFirstKeyframe = true;
+                        }
 
-                            const isKeyFrame = isH264Keyframe(chunkData);
+                        // WebCodecs requires SPS/PPS parameter sets before decoding delta frames
+                        if (!hasReceivedFirstKeyframe) {
+                            requestKeyframeFromSender();
+                            return;
+                        }
+
+                        try {
+                            streamTimestampUs += 16666; // Monotonic timestamp in microseconds
                             const chunk = new EncodedVideoChunk({
-                                type: isKeyFrame ? 'key' : 'delta',
-                                timestamp: Number(ptsUs),
-                                data: chunkData
+                                type: isKey ? 'key' : 'delta',
+                                timestamp: streamTimestampUs,
+                                data: uint8 // Full NAL unit including start code
                             });
                             videoDecoder.decode(chunk);
                         } catch (e) {
-                            // On decode error, request keyframe
+                            console.warn('[DECODE:ERR] Failed to decode chunk:', e);
+                            requestKeyframeFromSender();
                         }
                     }
                 }
@@ -430,21 +464,32 @@
         }
 
         function isH264Keyframe(data) {
-            for (let i = 0; i < Math.min(data.length - 4, 30); i++) {
-                if (data[i] === 0 && data[i+1] === 0 && (data[i+2] === 1 || (data[i+2] === 0 && data[i+3] === 1))) {
-                    const nalIndex = (data[i+2] === 1) ? i + 3 : i + 4;
-                    const nalType = data[nalIndex] & 0x1F;
-                    if (nalType === 5 || nalType === 7) return true; // IDR or SPS
+            // Scan for NAL units in Annex B format
+            for (let i = 0; i < Math.min(data.length - 4, 128); i++) {
+                if (data[i] === 0 && data[i + 1] === 0) {
+                    let nalIndex = -1;
+                    if (data[i + 2] === 1) {
+                        nalIndex = i + 3;
+                    } else if (data[i + 2] === 0 && data[i + 3] === 1) {
+                        nalIndex = i + 4;
+                    }
+                    if (nalIndex !== -1 && nalIndex < data.length) {
+                        const nalType = data[nalIndex] & 0x1F;
+                        // NAL Type 5 = IDR Slice, Type 7 = SPS
+                        if (nalType === 5 || nalType === 7) {
+                            return true;
+                        }
+                    }
                 }
             }
             return false;
         }
 
-        function playPcmAudio(buffer) {
+        function playPcmAudio(pcmBuffer) {
             if (isAudioMuted || !audioContext) return;
             try {
                 // PCM 16-bit signed stereo @ 44.1kHz
-                const pcmBytes = new Int16Array(buffer, 4); // skip 4-byte header
+                const pcmBytes = new Int16Array(pcmBuffer);
                 const floatData = new Float32Array(pcmBytes.length);
                 for (let i = 0; i < pcmBytes.length; i++) {
                     floatData[i] = pcmBytes[i] / 32768.0;
@@ -461,26 +506,82 @@
         connectViewerWs();
 
         // 4. Reverse Touch / Mouse Forwarding to Android Phone
-        canvas.addEventListener('mousedown', (e) => sendTouchEvent('DOWN', e));
-        canvas.addEventListener('mousemove', (e) => {
-            if (e.buttons === 1) sendTouchEvent('MOVE', e);
-        });
-        canvas.addEventListener('mouseup', (e) => sendTouchEvent('UP', e));
+        let isMouseDown = false;
+        let touchEventCounter = 0;
 
-        function sendTouchEvent(action, e) {
-            if (!viewerWs || viewerWs.readyState !== WebSocket.OPEN) return;
+        function getNormalizedCoords(clientX, clientY) {
             const rect = canvas.getBoundingClientRect();
-            const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-
-            viewerWs.send(JSON.stringify({
-                type: 'touch',
-                action: action,
-                x: x,
-                y: y,
-                time: Date.now()
-            }));
+            if (rect.width <= 0 || rect.height <= 0) return null;
+            const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+            return { x, y };
         }
+
+        function dispatchTouch(action, clientX, clientY) {
+            if (!viewerWs || viewerWs.readyState !== WebSocket.OPEN) return;
+            const coords = getNormalizedCoords(clientX, clientY);
+            if (!coords) return;
+
+            const touchPayload = {
+                type: 'touch',
+                action: action.toLowerCase(), // 'down', 'move', 'up'
+                x: coords.x,
+                y: coords.y,
+                time: Date.now()
+            };
+
+            viewerWs.send(JSON.stringify(touchPayload));
+            touchEventCounter++;
+            const touchHud = document.querySelector('#hud div:last-child span');
+            if (touchHud) {
+                touchHud.textContent = `Active (${action.toUpperCase()})`;
+            }
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            dispatchTouch('down', e.clientX, e.clientY);
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isMouseDown || e.buttons === 1) {
+                dispatchTouch('move', e.clientX, e.clientY);
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (isMouseDown) {
+                isMouseDown = false;
+                dispatchTouch('up', e.clientX, e.clientY);
+            }
+        });
+
+        // Touch event support for touchscreens / trackpads
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 0) {
+                isMouseDown = true;
+                dispatchTouch('down', e.touches[0].clientX, e.touches[0].clientY);
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 0) {
+                dispatchTouch('move', e.touches[0].clientX, e.touches[0].clientY);
+            }
+            e.preventDefault();
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', (e) => {
+            if (isMouseDown) {
+                isMouseDown = false;
+                const changed = e.changedTouches[0];
+                if (changed) {
+                    dispatchTouch('up', changed.clientX, changed.clientY);
+                }
+            }
+            e.preventDefault();
+        }, { passive: false });
 
         // 5. Controls Handlers
         btnAspect.addEventListener('click', () => {

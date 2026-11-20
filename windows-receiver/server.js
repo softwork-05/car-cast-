@@ -90,6 +90,12 @@ senderWss.on('connection', (ws, req) => {
     console.log(`[STREAM:SENDER] Android Phone connected from ${remoteIp}`);
     activeSenderSocket = ws;
 
+    // Immediately request an IDR keyframe with SPS/PPS from Android Phone
+    try {
+        ws.send(JSON.stringify({ type: 'request_keyframe' }));
+        console.log('[STREAM:SENDER] Sent initial request_keyframe to Phone');
+    } catch (_) {}
+
     // Notify viewers
     broadcastToViewers({
         type: 'status',
@@ -98,8 +104,13 @@ senderWss.on('connection', (ws, req) => {
         message: 'Phone Connected. Receiving Stream...'
     });
 
+    let frameCount = 0;
     ws.on('message', (data, isBinary) => {
         if (isBinary) {
+            frameCount++;
+            if (frameCount === 1 || frameCount % 300 === 0) {
+                console.log(`[STREAM:FRAME] Forwarded frame #${frameCount} (${data.length} bytes) to ${connectedViewers.size} viewer(s)`);
+            }
             // Forward binary video/audio frames to all connected PC viewer windows
             for (const viewer of connectedViewers) {
                 if (viewer.readyState === WebSocket.OPEN) {
@@ -153,12 +164,25 @@ viewerWss.on('connection', (ws) => {
         ws.send(JSON.stringify(latestMetadata));
     }
 
-    // Handle reverse touch/mouse events from PC screen and forward to phone
+    // If phone is already connected when viewer opens, request keyframe immediately
+    if (activeSenderSocket && activeSenderSocket.readyState === WebSocket.OPEN) {
+        try {
+            activeSenderSocket.send(JSON.stringify({ type: 'request_keyframe' }));
+            console.log('[VIEWER] Triggered keyframe sync for new viewer');
+        } catch (_) {}
+    }
+
+    // Handle reverse touch/mouse events and keyframe requests from PC screen and forward to phone
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message.toString());
-            if (data.type === 'touch' && activeSenderSocket && activeSenderSocket.readyState === WebSocket.OPEN) {
-                activeSenderSocket.send(JSON.stringify(data));
+            if (activeSenderSocket && activeSenderSocket.readyState === WebSocket.OPEN) {
+                if (data.type === 'touch' || data.type === 'request_keyframe') {
+                    activeSenderSocket.send(JSON.stringify(data));
+                    if (data.type === 'touch' && (data.action === 'down' || data.action === 'up')) {
+                        console.log(`[TOUCH:PC] Injected ${data.action} at (${data.x.toFixed(3)}, ${data.y.toFixed(3)}) -> Phone`);
+                    }
+                }
             }
         } catch (_) {}
     });
