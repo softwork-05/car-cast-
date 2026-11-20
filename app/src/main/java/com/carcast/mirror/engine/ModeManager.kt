@@ -32,7 +32,13 @@ object ModeManager {
                 AppMode.RECEIVER
             }
         } else {
-            if (prefs.getBoolean("is_sender_mode", false)) AppMode.SENDER else AppMode.RECEIVER
+            if (PlatformHelper.isAndroidTv(context)) {
+                AppMode.RECEIVER
+            } else if (prefs.getBoolean("is_sender_mode", false)) {
+                AppMode.SENDER
+            } else {
+                AppMode.RECEIVER
+            }
         }
         _currentMode.value = initialMode
         Log.i(TAG, "ModeManager initialized in mode: $initialMode")

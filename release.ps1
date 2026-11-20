@@ -20,6 +20,7 @@ param(
     [string]$Bump = "none",
     
     [string]$Tag = "",
+    [string]$Message = "",
     
     [switch]$DirectPublish = $true,
     [switch]$SkipTests = $false,
@@ -184,10 +185,33 @@ if ($DirectPublish) {
     "$apkHash  CarCastMirror.apk`r`n$apkHash  CarCastMirror-$ReleaseTag.apk" | Set-Content (Join-Path $DistDir "checksums.txt")
     
     Write-Host "Release APK ready. Size: $((Get-Item $distApk).Length / 1MB) MB, SHA-256: $apkHash" -ForegroundColor Green
+
+    # Package Windows Receiver into a clean standalone zip distribution
+    $winReceiverDir = Join-Path $ProjectRoot "windows-receiver"
+    $distWinZip = Join-Path $DistDir "CarCastMirror-Windows-Receiver-$ReleaseTag.zip"
+    if (Test-Path $winReceiverDir) {
+        Write-Host "Packaging Windows Receiver distribution..." -ForegroundColor Cyan
+        if (Test-Path $distWinZip) { Remove-Item $distWinZip -Force }
+        $tempPackDir = Join-Path $env:TEMP "CarCastMirror-WinPack"
+        if (Test-Path $tempPackDir) { Remove-Item $tempPackDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $tempPackDir | Out-Null
+        Copy-Item (Join-Path $winReceiverDir "server.js") $tempPackDir -Force
+        Copy-Item (Join-Path $winReceiverDir "package.json") $tempPackDir -Force
+        Copy-Item (Join-Path $winReceiverDir "run-windows-receiver.bat") $tempPackDir -Force
+        Copy-Item (Join-Path $winReceiverDir "run-windows-receiver.ps1") $tempPackDir -Force
+        Copy-Item (Join-Path $winReceiverDir "README.md") $tempPackDir -Force
+        Copy-Item (Join-Path $winReceiverDir "public") $tempPackDir -Recurse -Force
+        Compress-Archive -Path "$tempPackDir\*" -DestinationPath $distWinZip -Force
+        Remove-Item $tempPackDir -Recurse -Force
+        Write-Host "Windows Receiver packaged: $distWinZip" -ForegroundColor Green
+    }
 }
 
 # 6. Stage files and commit
 Write-Host "`nStaging git files..." -ForegroundColor Cyan
+git add AGENTS.md
+git add SMART_VIEW_COMPATIBILITY_REPORT.md
+git add windows-receiver/
 git add .gitignore
 git add app/src/
 git add app/build.gradle.kts
@@ -207,7 +231,7 @@ git add release.ps1
 
 $gitStatus = git status --porcelain
 if ($gitStatus) {
-    $commitMsg = "Release ${ReleaseTag}: Payment QR Side Panels, Internal Audio Routing & Full HD (Build $NewVersionCode)"
+    $commitMsg = if ($Message -ne "") { $Message } else { "Release ${ReleaseTag}: Android TV Support, Windows PC Receiver, Multi-Platform Discovery & Samsung Smart View Analysis (Build $NewVersionCode)" }
     Write-Host "Creating Git commit: '$commitMsg'..." -ForegroundColor Cyan
     git commit -m "$commitMsg"
 } else {
@@ -256,12 +280,16 @@ SHA-256: $apkHash  CarCastMirror.apk
 ---
 
 ### ✨ Key Features & Improvements
+- 📺 **Android TV & Google TV Full Support**: Native `LEANBACK_LAUNCHER` integration, TV remote D-Pad / OK / Back navigation, automatic TV Receiver mode, high-contrast 10-foot UI, and optional touchscreen hardware requirements.
+- 💻 **Windows PC Screen Mirroring Receiver**: Dedicated standalone desktop receiver for Windows 10/11 with W3C WebCodecs hardware GPU decoding, stereo PCM audio playback, bidirectional mouse reverse-touch control, and 1-click launcher.
+- 📡 **Multi-Platform Automatic Discovery (mDNS/NSD)**: Discovers Car LCD, Android TV, and Windows PC receivers in real-time, tracking devices by permanent stable IDs across dynamic IP changes with 1-Tap Connect and manual IP fallback.
+- 📋 **Samsung Smart View Technical Feasibility Report**: Authoritative architectural report detailing Miracast sink system permission restrictions (`CONFIGURE_WIFI_DISPLAY`), Google Cast attestation, and why CarCast 1-Tap Sender Mode provides the superior 60 FPS HD alternative with Hotspot active.
 - 💳 **Payment QR Side Panels (NayaPay & Easypaisa)**: Intelligently utilizes unused side pillarbox areas when mirroring portrait phones on widescreen Car LCDs by showing crisp NayaPay (Left) and Easypaisa (Right) QR codes with an ON/OFF toggle.
-- 🔊 **Direct Internal Audio Output to Car LCD**: Dedicated low-latency AudioTrack playback with automotive AudioFocus, jitter-free buffer, and selectable Audio Output routing (Car LCD Only / Phone Only / Both Devices) with phone speaker suppression.
+- 🔊 **Direct Internal Audio Output to Car LCD / TV / PC**: Dedicated low-latency AudioTrack playback with automotive AudioFocus, jitter-free buffer, and selectable Audio Output routing (Car/TV Only / Phone Only / Both Devices) with phone speaker suppression.
 - 🖥️ **Full HD Quality Streaming**: Razor-sharp 1080p-class encoding preserving phone aspect ratio without exceeding hardware encoder Level 4.2 limits.
-- 📱 **Fully Responsive UI**: Fluid Jetpack Compose layouts adapting seamlessly across 16:9 car screens, ultra-widescreens, tablets, and phones.
+- 📱 **Fully Responsive UI**: Fluid Jetpack Compose layouts adapting seamlessly across 16:9 car screens, ultra-widescreens, Android TV, tablets, and phones.
 - 🍏 **Apple iOS AirPlay 1080p Mirroring**: Native UxPlay engine with FairPlay authentication, low-latency H.264/HEVC hardware decoding, and zero-config mDNS discovery.
-- 🕹️ **Reverse Touch Control**: Control mirrored Android phones directly from the car touchscreen with smooth multi-touch gesture forwarding.
+- 🕹️ **Reverse Touch Control**: Control mirrored Android phones directly from the car touchscreen or PC mouse with smooth gesture forwarding.
 - 🚀 **Smart In-App Auto-Updates**: Seamless version checks via GitHub Releases API with numeric versionCode validation (Build $NewVersionCode) and automatic cleanup of obsolete cached APKs.
 "@ | Set-Content -Path $notesFile -Encoding UTF8
 
@@ -276,11 +304,21 @@ SHA-256: $apkHash  CarCastMirror.apk
         $releaseExists = $false
     }
 
+    $uploadAssets = @(
+        "$distApk#CarCastMirror.apk",
+        "$distVersionedApk#CarCastMirror-$ReleaseTag.apk",
+        (Join-Path $DistDir "CarCastMirror.apk.sha256"),
+        (Join-Path $DistDir "checksums.txt")
+    )
+    if ($distWinZip -and (Test-Path $distWinZip)) {
+        $uploadAssets += "$distWinZip#CarCastMirror-Windows-Receiver-$ReleaseTag.zip"
+    }
+
     if ($releaseExists) {
         Write-Host "Release $ReleaseTag already exists. Uploading assets to existing release..." -ForegroundColor Yellow
-        gh release upload $ReleaseTag "$distApk#CarCastMirror.apk" "$distVersionedApk#CarCastMirror-$ReleaseTag.apk" (Join-Path $DistDir "CarCastMirror.apk.sha256") (Join-Path $DistDir "checksums.txt") --clobber --repo $Repo
+        gh release upload $ReleaseTag @uploadAssets --clobber --repo $Repo
     } else {
-        gh release create $ReleaseTag "$distApk#CarCastMirror.apk" "$distVersionedApk#CarCastMirror-$ReleaseTag.apk" (Join-Path $DistDir "CarCastMirror.apk.sha256") (Join-Path $DistDir "checksums.txt") --title "CarCastMirror $ReleaseTag (Build $NewVersionCode)" --notes-file $notesFile --repo $Repo
+        gh release create $ReleaseTag @uploadAssets --title "CarCastMirror $ReleaseTag (Build $NewVersionCode)" --notes-file $notesFile --repo $Repo
     }
     
     Write-Host "`nRelease successfully published to GitHub!" -ForegroundColor Green

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Deep Space Navy Background -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M0,0h320v180h-320z" />
+
+    <!-- Card Background with Rounded Inset -->
+    <path
+        android:fillColor="#161B22"
+        android:pathData="M12,12h296v156h-296z" />
+
+    <!-- Cyan Accent Glowing Border -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.5"
+        android:pathData="M12,12h296v156h-296z" />
+
+    <!-- Cast Device Screen Outer Outline -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="3.5"
+        android:pathData="M70,45h180v80h-180z" />
+
+    <!-- Cast Waves (Radiating from bottom left) -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="3"
+        android:pathData="M70,113a12,12 0 0 1 12,-12" />
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="3"
+        android:pathData="M70,98a27,27 0 0 1 27,-27" />
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="3"
+        android:pathData="M70,83a42,42 0 0 1 42,-42" />
+
+    <!-- TV Stand Base -->
+    <path
+        android:fillColor="#8B949E"
+        android:pathData="M140,125h40v12h-40z" />
+    <path
+        android:fillColor="#8B949E"
+        android:pathData="M125,137h70v5h-70z" />
+
+    <!-- Neon Green Indicator Dot -->
+    <path
+        android:fillColor="#39D353"
+        android:pathData="M236,116m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
+
+</vector>

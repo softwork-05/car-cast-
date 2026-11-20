@@ -20,6 +20,7 @@ import com.carcast.mirror.engine.NetworkManager
 import com.carcast.mirror.engine.airplay.AirPlayDebugLogger
 import com.carcast.mirror.engine.airplay.AirPlayEngine
 import com.carcast.mirror.engine.airplay.AirPlayStreamListener
+import com.carcast.mirror.engine.discovery.CarCastDiscoveryAdvertiser
 import com.carcast.mirror.engine.androidcast.AndroidCastListener
 import com.carcast.mirror.engine.androidcast.AndroidCastServer
 import com.carcast.mirror.engine.decoder.HardwareVideoDecoder
@@ -72,6 +73,7 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
     private lateinit var networkManager: NetworkManager
     private var airplayEngine: AirPlayEngine? = null
     private var androidCastServer: AndroidCastServer? = null
+    private var discoveryAdvertiser: CarCastDiscoveryAdvertiser? = null
     val videoDecoder = HardwareVideoDecoder()
     val audioTrack by lazy { LowLatencyAudioTrack(this) }
 
@@ -185,6 +187,17 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
                 AirPlayDebugLogger.log("[SERVICE:ERROR] AndroidCastServer start error: ${e.message}")
             }
 
+            // 2b. Start CarCast multi-platform discovery advertiser (Android LCD, Android TV, Windows PC)
+            try {
+                discoveryAdvertiser = CarCastDiscoveryAdvertiser(this).apply {
+                    startAdvertising(_displayConfig.value.broadcastName)
+                }
+                AirPlayDebugLogger.log("[SERVICE:DISCOVERY] CarCast Discovery Advertiser started for '${_displayConfig.value.broadcastName}'")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start discovery advertiser", e)
+                AirPlayDebugLogger.log("[SERVICE:ERROR] DiscoveryAdvertiser start error: ${e.message}")
+            }
+
             // 3. Start network monitoring
             networkManager.startMonitoring()
 
@@ -232,6 +245,7 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
             .apply()
 
         _displayConfig.value = _displayConfig.value.copy(broadcastName = cleanName)
+        discoveryAdvertiser?.updateBroadcastName(cleanName)
         startAirPlayReceiver()
     }
 
@@ -490,6 +504,8 @@ class CarCastService : Service(), AirPlayStreamListener, AndroidCastListener {
         AirPlayDebugLogger.log("[SERVICE:LIFECYCLE] CarCastService onDestroy")
         airplayEngine?.stop()
         airplayEngine = null
+        discoveryAdvertiser?.stopAdvertising()
+        discoveryAdvertiser = null
         androidCastServer?.stop()
         androidCastServer = null
         videoDecoder.stop()

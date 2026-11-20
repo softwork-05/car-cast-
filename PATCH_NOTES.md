@@ -1,5 +1,14 @@
 # CarCastMirror Release Notes & Verification History
 
+## Version 1.0.10 (Build 10) — 20 November 2026
+- **Android TV & Google TV Full Support**: Added native `LEANBACK_LAUNCHER` integration, TV remote D-Pad navigation, automatic TV Receiver mode, high-contrast 10-foot UI, and optional touchscreen hardware requirements.
+- **Windows PC Screen Mirroring Receiver**: Dedicated standalone desktop receiver for Windows 10/11 with W3C WebCodecs hardware GPU decoding, stereo PCM audio playback, bidirectional mouse reverse-touch control, and 1-click launcher (`run-windows-receiver.bat`).
+- **Multi-Platform Automatic Discovery (mDNS/NSD)**: Discovers Car LCD, Android TV, and Windows PC receivers in real-time, tracking devices by permanent stable IDs across dynamic IP changes with 1-Tap Connect and manual IP fallback.
+- **Samsung Smart View Technical Feasibility Report**: Authoritative architectural report detailing Miracast sink system permission restrictions (`CONFIGURE_WIFI_DISPLAY`), Google Cast attestation, and why CarCast 1-Tap Sender Mode provides the superior 60 FPS HD alternative with Hotspot active.
+- **Permanent Release Automation**: Established permanent project-level release rules in `AGENTS.md` automating testing, version bumping, release APK signing, checksumming, and direct publishing to GitHub Releases.
+
+---
+
 ## Version 1.0.9 (Build 9) — 19 November 2026
 - **Payment QR Side Panels**: Intelligently displays NayaPay (Left) and Easypaisa (Right) QR codes in unused pillarbox margins when mirroring portrait phones on widescreen Car LCDs, maintaining exact aspect ratios, pixel-perfect reverse-touch mapping, and zero overlay interference. Features on-screen toggle in the floating control pill and in Settings (default OFF).
 - **Direct Internal Audio Output to Car LCD**: Dedicated low-latency `AudioTrack` with automotive `AudioFocus` request, jitter-free buffer queue, and user-configurable **Audio Output** route (**Car LCD Only**, **Phone Only**, **Both Devices**). In "Car LCD Only" mode, phone media volume is suppressed while streaming and automatically restored upon disconnect.

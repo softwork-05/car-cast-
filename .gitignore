@@ -47,6 +47,10 @@ signing.properties
 .DS_Store
 Thumbs.db
 
+# Node.js dependencies
+windows-receiver/node_modules/
+windows-receiver/package-lock.json
+
 # Ensure native prebuilt libraries are committed
 !app/src/main/jniLibs/**
 

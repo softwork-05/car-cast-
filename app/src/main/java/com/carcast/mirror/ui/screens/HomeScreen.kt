@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.PhoneIphone
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
@@ -63,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.carcast.mirror.engine.NetworkInfoState
+import com.carcast.mirror.engine.PlatformHelper
 import com.carcast.mirror.engine.airplay.AirPlayDebugLogger
 import com.carcast.mirror.model.ConnectionStatus
 import com.carcast.mirror.model.DisplayConfig
@@ -99,6 +101,7 @@ fun HomeScreen(
     val portalUrl = "http://${networkInfo.ipAddress}:8088"
     val configuration = LocalConfiguration.current
     val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    val isTv = remember { PlatformHelper.isAndroidTv(context) }
 
     LaunchedEffect(networkInfo.ipAddress) {
         if (networkInfo.ipAddress != "0.0.0.0") {
@@ -142,14 +145,14 @@ fun HomeScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.DirectionsCar,
+                            imageVector = if (isTv) Icons.Default.Tv else Icons.Default.DirectionsCar,
                             contentDescription = null,
                             tint = ElectricCyan,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Text(
-                        text = if (isCompact && screenWidth < 380.dp) "CarCast" else "CarCast Mirror",
+                        text = if (isTv) "CarCast TV" else if (isCompact && screenWidth < 380.dp) "CarCast" else "CarCast Mirror",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,

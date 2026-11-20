@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -30,21 +31,31 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +70,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.carcast.mirror.engine.discovery.CarCastDiscoveryManager
+import com.carcast.mirror.engine.discovery.DeviceIdHelper
+import com.carcast.mirror.engine.discovery.DiscoveredReceiver
+import com.carcast.mirror.engine.discovery.ReceiverPlatform
 import com.carcast.mirror.model.AudioOutputRoute
 import com.carcast.mirror.model.QualityProfile
 import com.carcast.mirror.service.CarCastAccessibilityService
@@ -108,6 +123,36 @@ fun MobileSenderScreen(
         )
     }
 
+    // --- Automatic Receiver Discovery & Stable ID Tracking ---
+    val discoveryManager = remember { CarCastDiscoveryManager(context) }
+    val discoveredReceivers by discoveryManager.discoveredReceivers.collectAsState()
+    val isScanning by discoveryManager.isScanning.collectAsState()
+
+    DisposableEffect(Unit) {
+        discoveryManager.startDiscovery()
+        onDispose {
+            discoveryManager.release()
+        }
+    }
+
+    val rememberedId = remember { DeviceIdHelper.getRememberedReceiverId(context) }
+    val rememberedName = remember { DeviceIdHelper.getRememberedReceiverName(context) }
+    var autoDetectedReceiverName by remember { mutableStateOf<String?>(null) }
+
+    // Auto-detect "My Car LCD" or previously paired receiver even if its IP changed
+    LaunchedEffect(discoveredReceivers) {
+        val target = discoveredReceivers.firstOrNull { it.isAutoDetected }
+            ?: discoveredReceivers.firstOrNull { DeviceIdHelper.matchesRememberedOrPreferred(it, rememberedId, rememberedName) }
+
+        if (target != null) {
+            autoDetectedReceiverName = target.name
+            if (target.host != carIp && senderState.status == SenderStatus.IDLE) {
+                carIp = target.host
+                DeviceIdHelper.saveRememberedReceiver(context, target.id, target.name, target.host)
+            }
+        }
+    }
+
     val isBroadcasting = senderState.status == SenderStatus.STREAMING ||
             senderState.status == SenderStatus.CONNECTING ||
             senderState.status == SenderStatus.CONNECTED ||
@@ -132,7 +177,7 @@ fun MobileSenderScreen(
                 putExtra(ScreenCaptureService.EXTRA_QUALITY_PROFILE, selectedProfile.name)
                 putExtra(ScreenCaptureService.EXTRA_AUDIO_ROUTE, selectedAudioRoute.name)
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(serviceIntent)
             } else {
                 context.startService(serviceIntent)
@@ -143,15 +188,15 @@ fun MobileSenderScreen(
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ ->
-        // Whether granted or denied, launch projection capture
         val projMgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projectionLauncher.launch(projMgr.createScreenCaptureIntent())
     }
 
-    fun startCaptureFlow() {
-        val cleanIp = carIp.trim()
-        if (cleanIp.isNotBlank()) {
-            prefs.edit().putString("last_target_ip", cleanIp).apply()
+    fun startCaptureFlow(targetOverrideIp: String? = null) {
+        val effectiveIp = (targetOverrideIp ?: carIp).trim()
+        if (effectiveIp.isNotBlank()) {
+            carIp = effectiveIp
+            prefs.edit().putString("last_target_ip", effectiveIp).apply()
 
             if (selectedAudioRoute == AudioOutputRoute.PHONE_ONLY) {
                 val projMgr = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -170,6 +215,16 @@ fun MobileSenderScreen(
                 }
             }
         }
+    }
+
+    fun connectToDevice(receiver: DiscoveredReceiver) {
+        DeviceIdHelper.saveRememberedReceiver(context, receiver.id, receiver.name, receiver.host)
+        autoDetectedReceiverName = receiver.name
+        startCaptureFlow(receiver.host)
+    }
+
+    val isSamsungDevice = remember {
+        Build.MANUFACTURER.contains("samsung", ignoreCase = true)
     }
 
     Box(
@@ -207,12 +262,12 @@ fun MobileSenderScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Switch to Car LCD Mode",
+                        contentDescription = "Switch to Receiver Mode",
                         tint = ElectricCyan,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Switch to Car LCD Mode",
+                        text = "Switch to Receiver Mode",
                         color = ElectricCyan,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -252,7 +307,7 @@ fun MobileSenderScreen(
             }
             val statusText = when (senderState.status) {
                 SenderStatus.STREAMING -> if (senderState.framesSent > 0) "● STREAMING LIVE" else "STARTING STREAM..."
-                SenderStatus.CONNECTING -> "CONNECTING TO CAR LCD..."
+                SenderStatus.CONNECTING -> "CONNECTING TO CAR / TV / PC..."
                 SenderStatus.CONNECTED -> "CONNECTED • LAUNCHING ENCODER"
                 SenderStatus.ENCODING -> "ENCODER ACTIVE • INITIALIZING"
                 SenderStatus.FAILED -> "CONNECTION FAILED"
@@ -274,10 +329,224 @@ fun MobileSenderScreen(
                 )
             }
 
-            // Car IP Input Field
+            // Auto-Detection Banner if a known receiver IP was dynamically resolved
+            if (autoDetectedReceiverName != null && !isBroadcasting) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NeonGreen.copy(alpha = 0.12f))
+                        .border(1.dp, NeonGreen.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, null, tint = NeonGreen, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "Auto-detected: $autoDetectedReceiverName ($carIp)",
+                            color = NeonGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // --- NEARBY CARCAST DEVICES LIST (Automatic NSD Discovery & 1-Tap Connect) ---
+            // =========================================================================
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF0D1117))
+                    .border(1.dp, Color(0xFF30363D), RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WifiTethering,
+                            contentDescription = null,
+                            tint = ElectricCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "NEARBY CARCAST RECEIVERS",
+                            color = ElectricCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (isScanning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                color = ElectricCyan,
+                                strokeWidth = 1.5.dp
+                            )
+                            Text(
+                                text = "Scanning...",
+                                color = TextSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = { discoveryManager.refresh() },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh Nearby Receivers",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (discoveredReceivers.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF161B22))
+                            .padding(12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isScanning) "Searching for Car LCD, Android TV or Windows PC on Wi-Fi / Hotspot..."
+                            else "No receivers found. Tap refresh or use Manual IP fallback below.",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                } else {
+                    discoveredReceivers.forEach { receiver ->
+                        val isCurrentTarget = receiver.host == carIp
+                        val deviceIcon = when (receiver.platform) {
+                            ReceiverPlatform.ANDROID_TV -> Icons.Default.Tv
+                            ReceiverPlatform.WINDOWS_PC -> Icons.Default.Computer
+                            else -> Icons.Default.DirectionsCar
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isCurrentTarget) Color(0xFF1F2937) else Color(0xFF161B22))
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isCurrentTarget) ElectricCyan else CardBorder,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(ElectricCyan.copy(alpha = 0.15f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = deviceIcon,
+                                        contentDescription = receiver.platform.label,
+                                        tint = ElectricCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = receiver.name,
+                                            color = TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (receiver.isAutoDetected) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(NeonGreen.copy(alpha = 0.15f))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "SAVED",
+                                                    color = NeonGreen,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = "${receiver.host}:${receiver.port} • ${receiver.platform.label}",
+                                        color = TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            // One-Tap Connect Button
+                            Button(
+                                onClick = { connectToDevice(receiver) },
+                                enabled = !isBroadcasting,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isCurrentTarget) NeonGreen else ElectricCyan
+                                ),
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Cast,
+                                    contentDescription = null,
+                                    tint = ObsidianBg,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isCurrentTarget && isBroadcasting) "Connected" else "Connect",
+                                    color = ObsidianBg,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Manual IP Input Fallback Field
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Car LCD Receiver IP Address:",
+                    text = "Target Receiver IP Address (Auto-filled or Manual Fallback):",
                     color = ElectricCyan,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
@@ -296,6 +565,45 @@ fun MobileSenderScreen(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            // Samsung Galaxy & Smart View Notice
+            if (isSamsungDevice) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1E293B))
+                        .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Samsung Galaxy & Smart View Info",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Smart View uses restricted Miracast sink hardware. Use CarCast 1-Tap Mirroring above for 60 FPS HD streaming with Mobile Hotspot active & Reverse Touch!",
+                                color = TextPrimary,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
             }
 
             // Quality Profile Selector Chips
@@ -385,7 +693,7 @@ fun MobileSenderScreen(
                             label = {
                                 Text(
                                     text = when (route) {
-                                        AudioOutputRoute.CAR_LCD_ONLY -> "Car LCD Only"
+                                        AudioOutputRoute.CAR_LCD_ONLY -> "Car/TV Only"
                                         AudioOutputRoute.PHONE_ONLY -> "Phone Only"
                                         AudioOutputRoute.BOTH_DEVICES -> "Both Devices"
                                     },
@@ -625,7 +933,7 @@ fun MobileSenderScreen(
                     Icon(Icons.Default.Cast, null, tint = ObsidianBg)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Start Mirroring to Car LCD",
+                        text = "Start Mirroring to Car / TV / PC",
                         color = ObsidianBg,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp

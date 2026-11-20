@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CarCast Mirror — Windows PC Receiver</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #0D1117;
+            color: #F0F6FC;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            width: 100vw;
+            height: 100vh;
+            user-select: none;
+        }
+
+        /* Top Header Bar */
+        .topbar {
+            height: 48px;
+            background: #161B22;
+            border-bottom: 1px solid #30363D;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            z-index: 100;
+        }
+        .branding {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .branding-icon {
+            width: 28px;
+            height: 28px;
+            background: rgba(0, 229, 255, 0.15);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #00E5FF;
+            font-size: 16px;
+        }
+        .title {
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            color: #F0F6FC;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #21262D;
+            border: 1px solid #30363D;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #8B949E;
+        }
+        .status-badge.online {
+            border-color: #39D353;
+            color: #39D353;
+            background: rgba(57, 211, 83, 0.12);
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8B949E;
+        }
+        .status-badge.online .status-dot {
+            background: #39D353;
+            box-shadow: 0 0 8px #39D353;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn {
+            background: #21262D;
+            border: 1px solid #30363D;
+            color: #00E5FF;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover {
+            background: #30363D;
+            border-color: #00E5FF;
+        }
+        .btn.active {
+            background: #00E5FF;
+            color: #0D1117;
+            font-weight: 700;
+        }
+
+        /* Video Stage */
+        .stage {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000000;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            cursor: crosshair;
+        }
+        canvas.fill-mode {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Standby / Waiting Overlay */
+        .standby-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #0D1117;
+            gap: 16px;
+            z-index: 50;
+            padding: 24px;
+            text-align: center;
+        }
+        .standby-card {
+            background: #161B22;
+            border: 1px solid #30363D;
+            border-radius: 20px;
+            padding: 32px 40px;
+            max-width: 520px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+        }
+        .radar-box {
+            width: 80px;
+            height: 80px;
+            background: rgba(0, 229, 255, 0.1);
+            border: 1px solid #00E5FF;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #00E5FF;
+            font-size: 36px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.4); }
+            70% { box-shadow: 0 0 0 20px rgba(0, 229, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+        }
+        .standby-title {
+            color: #00E5FF;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .standby-desc {
+            color: #8B949E;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .step-list {
+            text-align: left;
+            background: #0D1117;
+            border-radius: 10px;
+            padding: 12px 18px;
+            width: 100%;
+            font-size: 12px;
+            line-height: 1.8;
+            color: #C9D1D9;
+        }
+        .step-list b { color: #00E5FF; }
+
+        /* HUD Diagnostics */
+        .hud {
+            position: absolute;
+            bottom: 14px;
+            left: 14px;
+            background: rgba(13, 17, 23, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(48, 54, 61, 0.8);
+            border-radius: 10px;
+            padding: 8px 14px;
+            font-size: 11px;
+            color: #8B949E;
+            display: flex;
+            gap: 16px;
+            z-index: 80;
+            pointer-events: none;
+        }
+        .hud b { color: #00E5FF; }
+        .hud span { color: #39D353; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="topbar">
+        <div class="branding">
+            <div class="branding-icon">💻</div>
+            <div class="title">CarCast Windows Receiver</div>
+            <div id="statusBadge" class="status-badge">
+                <div class="status-dot"></div>
+                <span id="statusText">WAITING FOR SENDER</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="btnAspect" class="btn">Fit / Fill</button>
+            <button id="btnAudio" class="btn">🔊 Audio: On</button>
+            <button id="btnFullscreen" class="btn">⛶ Fullscreen (F11)</button>
+        </div>
+    </div>
+
+    <div class="stage" id="stage">
+        <canvas id="videoCanvas"></canvas>
+
+        <div id="standbyOverlay" class="standby-overlay">
+            <div class="standby-card">
+                <div class="radar-box">📡</div>
+                <div class="standby-title">CarCast Windows Screen Receiver</div>
+                <div class="standby-desc">
+                    Ready to receive high-definition screen mirroring from your Android phone or AirPlay device.
+                </div>
+                <div class="step-list">
+                    1. Open <b>CarCast Mirror</b> on your Android phone.<br>
+                    2. Select <b>Sender Mode</b>.<br>
+                    3. Under <b>Nearby CarCast Receivers</b>, tap <b>Connect</b> on this PC.<br>
+                    4. Enjoy seamless 1080p 60 FPS video, audio, and PC mouse reverse-touch control!
+                </div>
+            </div>
+        </div>
+
+        <div class="hud" id="hud">
+            <div>Res: <b id="hudRes">Waiting</b></div>
+            <div>FPS: <span id="hudFps">0</span></div>
+            <div>Frames: <b id="hudFrames">0</b></div>
+            <div>Touch: <span>Active</span></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('videoCanvas');
+        const ctx = canvas.getContext('2d');
+        const standbyOverlay = document.getElementById('standbyOverlay');
+        const statusBadge = document.getElementById('statusBadge');
+        const statusText = document.getElementById('statusText');
+        const hudRes = document.getElementById('hudRes');
+        const hudFps = document.getElementById('hudFps');
+        const hudFrames = document.getElementById('hudFrames');
+        const btnAspect = document.getElementById('btnAspect');
+        const btnAudio = document.getElementById('btnAudio');
+        const btnFullscreen = document.getElementById('btnFullscreen');
+
+        let isFitMode = true;
+        let isAudioMuted = false;
+        let frameCount = 0;
+        let lastFpsTime = performance.now();
+        let fpsCounter = 0;
+
+        let videoDecoder = null;
+        let audioContext = null;
+        let audioGainNode = null;
+        let isDecoderConfigured = false;
+        let streamWidth = 1080;
+        let streamHeight = 1920;
+
+        // 1. Audio Engine (Web Audio API)
+        function initAudio() {
+            if (!audioContext) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioCtx({ sampleRate: 44100 });
+                audioGainNode = audioContext.createGain();
+                audioGainNode.connect(audioContext.destination);
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+        window.addEventListener('click', () => initAudio(), { once: true });
+
+        // 2. Hardware WebCodecs Video Decoder
+        function initVideoDecoder() {
+            if (!('VideoDecoder' in window)) {
+                console.warn('WebCodecs VideoDecoder not supported in this browser. Falling back to canvas frame buffer.');
+                return;
+            }
+
+            videoDecoder = new VideoDecoder({
+                output: (videoFrame) => {
+                    standbyOverlay.style.display = 'none';
+                    statusBadge.classList.add('online');
+                    statusText.textContent = 'STREAMING LIVE';
+
+                    if (canvas.width !== videoFrame.displayWidth || canvas.height !== videoFrame.displayHeight) {
+                        canvas.width = videoFrame.displayWidth;
+                        canvas.height = videoFrame.displayHeight;
+                        streamWidth = videoFrame.displayWidth;
+                        streamHeight = videoFrame.displayHeight;
+                        hudRes.textContent = `${streamWidth}x${streamHeight}`;
+                    }
+
+                    ctx.drawImage(videoFrame, 0, 0, canvas.width, canvas.height);
+                    videoFrame.close();
+
+                    frameCount++;
+                    fpsCounter++;
+                    hudFrames.textContent = frameCount;
+
+                    const now = performance.now();
+                    if (now - lastFpsTime >= 1000) {
+                        hudFps.textContent = fpsCounter;
+                        fpsCounter = 0;
+                        lastFpsTime = now;
+                    }
+                },
+                error: (e) => {
+                    console.error('WebCodecs VideoDecoder error:', e);
+                }
+            });
+
+            // Configure H.264 Baseline/High Profile (avc1.64002a = High Profile Level 4.2)
+            try {
+                videoDecoder.configure({
+                    codec: 'avc1.42E01E', // Baseline fallback or avc1.64002a
+                    optimizeForLatency: true
+                });
+                isDecoderConfigured = true;
+            } catch (err) {
+                console.warn('Decoder config failed with default codec:', err);
+            }
+        }
+
+        initVideoDecoder();
+
+        // 3. Connect to Local WebSocket Viewer Relay
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/viewer`;
+        let viewerWs = null;
+
+        function connectViewerWs() {
+            viewerWs = new WebSocket(wsUrl);
+            viewerWs.binaryType = 'arraybuffer';
+
+            viewerWs.onopen = () => {
+                console.log('Connected to CarCast local viewer stream.');
+            };
+
+            viewerWs.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    // JSON Control message
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'status') {
+                            if (!msg.connected) {
+                                standbyOverlay.style.display = 'flex';
+                                statusBadge.classList.remove('online');
+                                statusText.textContent = 'WAITING FOR SENDER';
+                                hudFps.textContent = '0';
+                            }
+                        } else if (msg.type === 'meta') {
+                            streamWidth = msg.width || streamWidth;
+                            streamHeight = msg.height || streamHeight;
+                            hudRes.textContent = `${streamWidth}x${streamHeight}`;
+                        }
+                    } catch (_) {}
+                } else {
+                    // Binary Video / Audio Frame
+                    const buffer = event.data;
+                    const view = new DataView(buffer);
+                    if (buffer.byteLength < 4) return;
+
+                    // Audio packet identifier: first byte is 0x02
+                    const firstByte = view.getUint8(0);
+                    if (firstByte === 0x02) {
+                        playPcmAudio(buffer);
+                        return;
+                    }
+
+                    // Video Frame: H.264 NAL Unit
+                    if (videoDecoder && videoDecoder.state === 'configured') {
+                        try {
+                            // Extract PTS (8 bytes at offset 0 if sender sends PTS header)
+                            // or feed NALU directly as EncodedVideoChunk
+                            const chunkData = new Uint8Array(buffer, 8); // Skip 8-byte PTS header
+                            const ptsUs = view.getBigInt64(0, false);
+
+                            const isKeyFrame = isH264Keyframe(chunkData);
+                            const chunk = new EncodedVideoChunk({
+                                type: isKeyFrame ? 'key' : 'delta',
+                                timestamp: Number(ptsUs),
+                                data: chunkData
+                            });
+                            videoDecoder.decode(chunk);
+                        } catch (e) {
+                            // On decode error, request keyframe
+                        }
+                    }
+                }
+            };
+
+            viewerWs.onclose = () => {
+                setTimeout(connectViewerWs, 1500);
+            };
+        }
+
+        function isH264Keyframe(data) {
+            for (let i = 0; i < Math.min(data.length - 4, 30); i++) {
+                if (data[i] === 0 && data[i+1] === 0 && (data[i+2] === 1 || (data[i+2] === 0 && data[i+3] === 1))) {
+                    const nalIndex = (data[i+2] === 1) ? i + 3 : i + 4;
+                    const nalType = data[nalIndex] & 0x1F;
+                    if (nalType === 5 || nalType === 7) return true; // IDR or SPS
+                }
+            }
+            return false;
+        }
+
+        function playPcmAudio(buffer) {
+            if (isAudioMuted || !audioContext) return;
+            try {
+                // PCM 16-bit signed stereo @ 44.1kHz
+                const pcmBytes = new Int16Array(buffer, 4); // skip 4-byte header
+                const floatData = new Float32Array(pcmBytes.length);
+                for (let i = 0; i < pcmBytes.length; i++) {
+                    floatData[i] = pcmBytes[i] / 32768.0;
+                }
+                const audioBuffer = audioContext.createBuffer(1, floatData.length, 44100);
+                audioBuffer.getChannelData(0).set(floatData);
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioGainNode);
+                source.start();
+            } catch (_) {}
+        }
+
+        connectViewerWs();
+
+        // 4. Reverse Touch / Mouse Forwarding to Android Phone
+        canvas.addEventListener('mousedown', (e) => sendTouchEvent('DOWN', e));
+        canvas.addEventListener('mousemove', (e) => {
+            if (e.buttons === 1) sendTouchEvent('MOVE', e);
+        });
+        canvas.addEventListener('mouseup', (e) => sendTouchEvent('UP', e));
+
+        function sendTouchEvent(action, e) {
+            if (!viewerWs || viewerWs.readyState !== WebSocket.OPEN) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+            viewerWs.send(JSON.stringify({
+                type: 'touch',
+                action: action,
+                x: x,
+                y: y,
+                time: Date.now()
+            }));
+        }
+
+        // 5. Controls Handlers
+        btnAspect.addEventListener('click', () => {
+            isFitMode = !isFitMode;
+            canvas.className = isFitMode ? '' : 'fill-mode';
+            btnAspect.textContent = isFitMode ? 'Fit Screen' : 'Fill Screen';
+        });
+
+        btnAudio.addEventListener('click', () => {
+            initAudio();
+            isAudioMuted = !isAudioMuted;
+            btnAudio.textContent = isAudioMuted ? '🔇 Audio: Muted' : '🔊 Audio: On';
+            if (audioGainNode) audioGainNode.gain.value = isAudioMuted ? 0 : 1;
+        });
+
+        btnFullscreen.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen().catch(() => {});
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'F11' || e.key === 'f') {
+                e.preventDefault();
+                btnFullscreen.click();
+            }
+        });
+    </script>
+</body>
+</html>
