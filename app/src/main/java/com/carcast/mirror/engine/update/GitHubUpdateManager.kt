@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -26,7 +27,8 @@ enum class UpdateStatus {
     UPDATE_AVAILABLE,
     READY_TO_INSTALL,
     DOWNLOADING,
-    CHECK_FAILED
+    CHECK_FAILED,
+    DOWNLOAD_FAILED
 }
 
 data class UpdateCheckResult(
@@ -63,6 +65,37 @@ class GitHubUpdateManager(private val context: Context) {
                 sdf.format(Date(timestampMs))
             } catch (_: Exception) {
                 Date(timestampMs).toString()
+            }
+        }
+
+        fun sanitizeErrorMessage(rawMessage: String?): String {
+            if (rawMessage.isNullOrBlank()) {
+                return "Could not connect to the update server. Please check your internet connection."
+            }
+            val lower = rawMessage.lowercase(Locale.ROOT)
+            return when {
+                lower.contains("blobnotfound") || lower.contains("404") -> {
+                    "The update file is not yet available or was replaced on the server. Please tap Retry to fetch the latest download link."
+                }
+                lower.contains("403") || lower.contains("accessdenied") -> {
+                    "The update download link has expired or access was denied. Please tap Retry to generate a fresh link."
+                }
+                lower.contains("timeout") || lower.contains("timed out") -> {
+                    "The connection timed out while downloading the update. Please check your network and tap Retry."
+                }
+                lower.contains("500") || lower.contains("502") || lower.contains("503") || lower.contains("504") -> {
+                    "The GitHub update service is temporarily experiencing high load. Please try again shortly."
+                }
+                lower.contains("integrity") || lower.contains("corrupt") -> {
+                    "The downloaded update package failed integrity verification. Please tap Retry to download again."
+                }
+                rawMessage.contains("release-assets.githubusercontent.com") ||
+                        rawMessage.contains("objects.githubusercontent.com") ||
+                        rawMessage.startsWith("http://") ||
+                        rawMessage.startsWith("https://") -> {
+                    "Unable to retrieve the update package from the server. Please verify your connection or use the browser download option."
+                }
+                else -> rawMessage
             }
         }
     }
@@ -237,13 +270,28 @@ class GitHubUpdateManager(private val context: Context) {
             var apkSizeBytes = 0L
 
             if (assets != null) {
+                // Pass 1: Prioritize exact named APKs (versioned or standard CarCastMirror.apk)
                 for (i in 0 until assets.length()) {
                     val asset = assets.getJSONObject(i)
                     val name = asset.optString("name", "")
-                    if (name.endsWith(".apk", ignoreCase = true)) {
+                    if (name.equals("CarCastMirror-v$tagName.apk", ignoreCase = true) ||
+                        name.equals("CarCastMirror.apk", ignoreCase = true)
+                    ) {
                         apkDownloadUrl = asset.optString("browser_download_url", "")
                         apkSizeBytes = asset.optLong("size", 0L)
                         break
+                    }
+                }
+                // Pass 2 fallback: any .apk
+                if (apkDownloadUrl.isEmpty()) {
+                    for (i in 0 until assets.length()) {
+                        val asset = assets.getJSONObject(i)
+                        val name = asset.optString("name", "")
+                        if (name.endsWith(".apk", ignoreCase = true)) {
+                            apkDownloadUrl = asset.optString("browser_download_url", "")
+                            apkSizeBytes = asset.optLong("size", 0L)
+                            break
+                        }
                     }
                 }
             }
@@ -311,25 +359,82 @@ class GitHubUpdateManager(private val context: Context) {
         downloadUrl: String,
         onProgress: (Int) -> Unit = {}
     ): Result<File> = withContext(Dispatchers.IO) {
+        var currentConnection: HttpURLConnection? = null
         try {
-            val url = URL(downloadUrl)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15000
-                readTimeout = 30000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "CarCastMirror-App")
+            var currentUrl = downloadUrl.trim()
+            if (currentUrl.isEmpty()) {
+                throw IOException("Download URL is empty")
             }
 
-            val totalSize = connection.contentLength
+            var redirectCount = 0
+            val maxRedirects = 6
+
+            // Follow HTTP redirects explicitly across domains (e.g. github.com -> release-assets.githubusercontent.com)
+            while (true) {
+                val targetUrl = URL(currentUrl)
+                val conn = (targetUrl.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 25000
+                    readTimeout = 60000
+                    instanceFollowRedirects = false // Explicitly handle redirects
+                    setRequestProperty("User-Agent", "CarCastMirror-App")
+                    setRequestProperty("Accept", "application/octet-stream, application/vnd.android.package-archive, */*")
+                }
+                currentConnection = conn
+
+                val responseCode = conn.responseCode
+                Log.d(TAG, "Download connection: HTTP $responseCode for host ${targetUrl.host}")
+
+                if (responseCode in 300..399) {
+                    val location = conn.getHeaderField("Location")
+                        ?: throw IOException("Server issued HTTP $responseCode redirect without a Location header")
+                    conn.disconnect()
+                    currentUrl = if (location.startsWith("http://", ignoreCase = true) ||
+                        location.startsWith("https://", ignoreCase = true)
+                    ) {
+                        location
+                    } else {
+                        URL(targetUrl, location).toString()
+                    }
+                    redirectCount++
+                    if (redirectCount > maxRedirects) {
+                        throw IOException("Too many redirects ($redirectCount) encountered while resolving download URL")
+                    }
+                    continue
+                }
+
+                if (responseCode !in 200..299) {
+                    val errorDetail = try {
+                        conn.errorStream?.bufferedReader()?.use { it.readText().take(500) } ?: ""
+                    } catch (_: Exception) { "" }
+                    conn.disconnect()
+
+                    Log.e(TAG, "Download failed with HTTP $responseCode: $errorDetail")
+                    val message = when (responseCode) {
+                        404 -> "The update package is not found on the server (HTTP 404). It may have been replaced or is still uploading."
+                        403 -> "The update download link has expired or access was denied (HTTP 403)."
+                        in 500..599 -> "The GitHub update server is temporarily unavailable (HTTP $responseCode)."
+                        else -> "Server returned HTTP $responseCode while downloading update."
+                    }
+                    throw IOException(message)
+                }
+
+                // HTTP 2xx OK reached
+                break
+            }
+
+            val finalConn = currentConnection ?: throw IOException("Unable to open download connection")
+            val totalSize = finalConn.contentLengthLong.takeIf { it > 0 } ?: finalConn.contentLength.toLong()
+
             val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+            val tempFile = File(updatesDir, "CarCastMirror_update.apk.tmp")
             val outputFile = File(updatesDir, "CarCastMirror_update.apk")
-            if (outputFile.exists()) {
-                outputFile.delete()
-            }
 
-            connection.inputStream.use { input ->
-                FileOutputStream(outputFile).use { output ->
-                    val buffer = ByteArray(8192)
+            if (tempFile.exists()) tempFile.delete()
+            if (outputFile.exists()) outputFile.delete()
+
+            finalConn.inputStream.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    val buffer = ByteArray(16384)
                     var bytesRead: Int
                     var totalRead = 0L
 
@@ -337,11 +442,23 @@ class GitHubUpdateManager(private val context: Context) {
                         output.write(buffer, 0, bytesRead)
                         totalRead += bytesRead
                         if (totalSize > 0) {
-                            val progress = ((totalRead * 100) / totalSize).toInt()
+                            val progress = ((totalRead * 100) / totalSize).toInt().coerceIn(0, 100)
                             onProgress(progress)
                         }
                     }
+                    output.flush()
                 }
+            }
+
+            if (!tempFile.exists() || tempFile.length() == 0L) {
+                tempFile.delete()
+                throw IOException("Downloaded update file is empty (0 bytes received)")
+            }
+
+            // Move temp file to final destination atomically
+            if (!tempFile.renameTo(outputFile)) {
+                tempFile.copyTo(outputFile, overwrite = true)
+                tempFile.delete()
             }
 
             if (!verifyApk(outputFile)) {
@@ -354,8 +471,13 @@ class GitHubUpdateManager(private val context: Context) {
 
             Result.success(outputFile)
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed", e)
-            Result.failure(e)
+            val sanitizedMsg = sanitizeErrorMessage(e.message)
+            Log.e(TAG, "Download failed: $sanitizedMsg", e)
+            Result.failure(Exception(sanitizedMsg, e))
+        } finally {
+            try {
+                currentConnection?.disconnect()
+            } catch (_: Exception) {}
         }
     }
 

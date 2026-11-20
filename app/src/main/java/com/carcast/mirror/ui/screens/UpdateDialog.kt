@@ -1,5 +1,7 @@
 package com.carcast.mirror.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
@@ -90,11 +93,55 @@ fun UpdateDialog(
                     updateStatus = res.status
                 },
                 onFailure = { err ->
-                    errorMessage = err.message ?: "Unable to connect to GitHub"
+                    errorMessage = GitHubUpdateManager.sanitizeErrorMessage(err.message)
                     updateStatus = UpdateStatus.CHECK_FAILED
                 }
             )
         }
+    }
+
+    fun startDownload(targetDownloadUrl: String) {
+        updateStatus = UpdateStatus.DOWNLOADING
+        downloadProgress = 0
+        errorMessage = null
+        scope.launch {
+            var urlToUse = targetDownloadUrl
+            if (urlToUse.isBlank()) {
+                val refresh = updater.checkForUpdate(gitHubRepo)
+                urlToUse = refresh.getOrNull()?.downloadUrl ?: ""
+            }
+
+            if (urlToUse.isBlank()) {
+                errorMessage = "Could not locate a valid APK download link on GitHub."
+                updateStatus = UpdateStatus.DOWNLOAD_FAILED
+                return@launch
+            }
+
+            val dlResult = updater.downloadApk(urlToUse) { p ->
+                downloadProgress = p
+            }
+            dlResult.fold(
+                onSuccess = { file ->
+                    downloadedFile = file
+                    updateStatus = UpdateStatus.READY_TO_INSTALL
+                },
+                onFailure = { err ->
+                    errorMessage = GitHubUpdateManager.sanitizeErrorMessage(err.message)
+                    updateStatus = UpdateStatus.DOWNLOAD_FAILED
+                }
+            )
+        }
+    }
+
+    fun openInBrowser(url: String?) {
+        try {
+            val cleanUrl = url?.takeIf { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
+                ?: "https://github.com/${gitHubRepo.trim()}/releases/latest"
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(cleanUrl)).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(browserIntent)
+        } catch (_: Exception) {}
     }
 
     LaunchedEffect(Unit) {
@@ -221,6 +268,72 @@ fun UpdateDialog(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Retry", color = ElectricCyan, fontWeight = FontWeight.Bold)
                             }
+                            Button(
+                                onClick = { openInBrowser("https://github.com/${gitHubRepo.trim()}/releases") },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1C2128)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.OpenInBrowser, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Open GitHub Releases", color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    UpdateStatus.DOWNLOAD_FAILED -> {
+                        val res = updateResult
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF161B22))
+                                .border(1.dp, ErrorRed.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(Icons.Default.ErrorOutline, null, tint = ErrorRed, modifier = Modifier.size(24.dp))
+                                Text(
+                                    text = "Update Download Failed",
+                                    color = ErrorRed,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            Text(
+                                text = errorMessage ?: "The update could not be downloaded from the server.",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = {
+                                    startDownload(res?.downloadUrl ?: "")
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Refresh, null, tint = ObsidianBg, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry Download", color = ObsidianBg, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = {
+                                    val browserUrl = res?.downloadUrl?.takeIf { it.isNotBlank() }
+                                        ?: "https://github.com/${gitHubRepo.trim()}/releases/latest"
+                                    openInBrowser(browserUrl)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.OpenInBrowser, null, tint = ElectricCyan, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Open in Browser", color = ElectricCyan, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
 
@@ -324,27 +437,27 @@ fun UpdateDialog(
 
                             Button(
                                 onClick = {
-                                    updateStatus = UpdateStatus.DOWNLOADING
-                                    scope.launch {
-                                        val dlResult = updater.downloadApk(res.downloadUrl) { p ->
-                                            downloadProgress = p
-                                        }
-                                        dlResult.fold(
-                                            onSuccess = { file ->
-                                                downloadedFile = file
-                                                updateStatus = UpdateStatus.READY_TO_INSTALL
-                                            },
-                                            onFailure = { err ->
-                                                errorMessage = "Download failed: ${err.message}"
-                                                updateStatus = UpdateStatus.CHECK_FAILED
-                                            }
-                                        )
-                                    }
+                                    startDownload(res.downloadUrl)
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
+                                Icon(Icons.Default.CloudDownload, null, tint = ObsidianBg, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text("Download Update", color = ObsidianBg, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    openInBrowser(res.downloadUrl)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CardBorderActive),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.OpenInBrowser, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Download via Browser", color = TextSecondary, fontSize = 12.sp)
                             }
                         }
                     }

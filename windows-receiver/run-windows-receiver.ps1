@@ -1,4 +1,4 @@
-﻿# CarCast Mirror — Windows PC Receiver Launcher
+# CarCast Mirror — Windows PC Receiver Launcher
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

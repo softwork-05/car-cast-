@@ -288,6 +288,7 @@ SHA-256: $apkHash  CarCastMirror.apk
 ---
 
 ### ✨ Key Features & Improvements
+- 🔄 **Resilient In-App Update Engine**: Manual HTTP 301/302/307/308 redirect follower across cloud CDNs (GitHub → Azure Blob Storage), HTTP status pre-checks (404/403/5xx), atomic temporary file streaming, sanitized error reporting (preventing raw SAS URLs from leaking into UI), "Open in Browser" direct fallback, and 1-tap download retry with fresh authentication tokens.
 - 📺 **Android TV & Google TV Full Support**: Native `LEANBACK_LAUNCHER` integration, TV remote D-Pad / OK / Back navigation, automatic TV Receiver mode, high-contrast 10-foot UI, and optional touchscreen hardware requirements.
 - 💻 **Windows PC Screen Mirroring Receiver**: Dedicated standalone desktop receiver for Windows 10/11 with W3C WebCodecs hardware GPU decoding, stereo PCM audio playback, bidirectional mouse reverse-touch control, and 1-click launcher.
 - 📡 **Multi-Platform Automatic Discovery (mDNS/NSD)**: Discovers Car LCD, Android TV, and Windows PC receivers in real-time, tracking devices by permanent stable IDs across dynamic IP changes with 1-Tap Connect and manual IP fallback.
