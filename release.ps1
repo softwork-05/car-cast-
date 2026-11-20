@@ -197,8 +197,24 @@ if ($DirectPublish) {
     # Package Windows Receiver into a clean standalone zip distribution
     $winReceiverDir = Join-Path $ProjectRoot "windows-receiver"
     $distWinZip = Join-Path $DistDir "CarCastMirror-Windows-Receiver-$ReleaseTag.zip"
+    $winAppBuildScript = Join-Path $winReceiverDir "build-windows-app.ps1"
+    if (Test-Path $winAppBuildScript) {
+        Write-Host "Rebuilding standalone Windows Desktop App package..." -ForegroundColor Cyan
+        & $winAppBuildScript
+    }
+
     $winAppDir = "D:\Projects\CarCastMirror\CarCastMirror-Windows-App"
     if (Test-Path $winAppDir) {
+        Write-Host "Updating all Windows App timestamps to current date/time..." -ForegroundColor Cyan
+        $releaseTime = Get-Date
+        Get-ChildItem -Path $winAppDir -Recurse | ForEach-Object {
+            try {
+                $_.LastWriteTime = $releaseTime
+                $_.CreationTime = $releaseTime
+                $_.LastAccessTime = $releaseTime
+            } catch { }
+        }
+
         Write-Host "Packaging Standalone Windows Desktop App distribution..." -ForegroundColor Cyan
         if (Test-Path $distWinZip) { Remove-Item $distWinZip -Force }
         Compress-Archive -Path "$winAppDir\*" -DestinationPath $distWinZip -Force
@@ -223,6 +239,7 @@ if ($DirectPublish) {
 }
 
 # 6. Stage files and commit
+Set-Location $ProjectRoot
 Write-Host "`nStaging git files..." -ForegroundColor Cyan
 git add AGENTS.md
 git add SMART_VIEW_COMPATIBILITY_REPORT.md

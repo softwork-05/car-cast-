@@ -17,7 +17,7 @@ namespace CarCastMirror
                 Path.Combine(appDir, "..", "CarCastMirror-Windows-App", "CarCastMirror.exe"),
                 Path.Combine(appDir, "dist-app", "CarCastMirror.exe"),
                 Path.Combine(appDir, "windows-receiver", "dist-app", "CarCastMirror.exe"),
-                Path.Combine(appDir, "windows-receiver", "node_modules", "electron", "dist", "electron.exe")
+                Path.Combine(appDir, "CarCastMirror.exe")
             };
 
             foreach (string ap in appPaths)
@@ -25,6 +25,12 @@ namespace CarCastMirror
                 try
                 {
                     string fullPath = Path.GetFullPath(ap);
+                    // Avoid launching self in an infinite loop
+                    if (string.Equals(fullPath, System.Reflection.Assembly.GetExecutingAssembly().Location, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     if (File.Exists(fullPath))
                     {
                         ProcessStartInfo psi = new ProcessStartInfo
@@ -39,13 +45,6 @@ namespace CarCastMirror
                 }
                 catch { }
             }
-
-            // Fallback: If bundled app is somehow not found, open local portal
-            try
-            {
-                Process.Start("http://localhost:8088");
-            }
-            catch { }
         }
     }
 }

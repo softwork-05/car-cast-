@@ -1,32 +1,45 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const serverManager = require('./server.js');
+
+const logFile = path.join(os.tmpdir(), 'carcast_app.log');
+function log(msg) {
+    try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`); } catch (_) {}
+}
+
+log('Electron main script entered');
+
+// 1. Enforce strict single-instance lock across Windows
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+    log('Duplicate instance detected. Exiting.');
+    app.quit();
+    process.exit(0);
+}
+
+log('Acquired single instance lock');
 
 let mainWindow = null;
 
-// Start internal streaming receiver server
-function startServer(onReady) {
-    const checkReq = http.get('http://127.0.0.1:8088/', (res) => {
-        // Server already listening
-        onReady();
-    });
-    checkReq.on('error', () => {
-        // Not running yet, start server.js
-        try {
-            require('./server.js');
-        } catch (e) {
-            console.error('Failed to start server.js:', e);
-        }
-        setTimeout(onReady, 600);
-    });
-    checkReq.setTimeout(300, () => {
-        checkReq.destroy();
-        try { require('./server.js'); } catch (_) {}
-        setTimeout(onReady, 600);
-    });
-}
+// If a second instance is launched (e.g. user double-clicked exe again), focus the existing window
+app.on('second-instance', (event, commandLine, workingDirectory) => {
+    log('Second instance invoked, focusing existing window');
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+    }
+});
 
 function createWindow() {
+    if (mainWindow) {
+        mainWindow.focus();
+        return;
+    }
+
+    log('Creating main BrowserWindow');
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 820,
@@ -41,18 +54,26 @@ function createWindow() {
         }
     });
 
-    mainWindow.loadURL('http://localhost:8088');
+    const targetUrl = `http://localhost:${serverManager.HTTP_PORT}`;
+    log('Loading URL in BrowserWindow: ' + targetUrl);
+    mainWindow.loadURL(targetUrl);
 
     mainWindow.on('closed', () => {
+        log('Main window closed');
         mainWindow = null;
-        app.quit();
     });
 }
 
+let serverStarted = false;
 app.whenReady().then(() => {
-    startServer(() => {
-        createWindow();
-    });
+    log('app.whenReady fired');
+    if (!serverStarted) {
+        serverStarted = true;
+        serverManager.startServer(() => {
+            log('serverManager.startServer callback fired');
+            createWindow();
+        });
+    }
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -60,5 +81,13 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-    app.quit();
+    log('app.window-all-closed fired');
+    serverManager.stopServer(() => {
+        app.quit();
+    });
+});
+
+app.on('before-quit', () => {
+    log('app.before-quit fired');
+    serverManager.stopServer();
 });
