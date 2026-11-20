@@ -116,8 +116,16 @@ Write-Host "Target Release Tag  : $ReleaseTag" -ForegroundColor Magenta
 Write-Host "`nChecking remote tags on $Remote..." -ForegroundColor Cyan
 $remoteTags = git ls-remote --tags $Remote
 if ($remoteTags -match "refs/tags/$ReleaseTag(\^\{\})?$") {
-    Write-Error "Tag $ReleaseTag ALREADY exists on remote $Remote! To prevent overwriting published releases, please choose a newer version tag (e.g. .\release.ps1 -Bump patch)."
-    exit 1
+    # Check if this tag points to the current HEAD commit (e.g. resumption of release publishing)
+    $headCommit = (git rev-parse HEAD).Trim()
+    $tagCommit = (git rev-parse "$ReleaseTag^{commit}" 2>$null)
+    if ($tagCommit) { $tagCommit = $tagCommit.Trim() }
+    if ($tagCommit -and $headCommit -eq $tagCommit) {
+        Write-Host "Tag $ReleaseTag points to current HEAD commit ($headCommit). Resuming release publication..." -ForegroundColor Yellow
+    } else {
+        Write-Error "Tag $ReleaseTag ALREADY exists on remote $Remote! To prevent overwriting published releases, please choose a newer version tag (e.g. .\release.ps1 -Bump patch)."
+        exit 1
+    }
 }
 
 # 4. Run unit tests before release
@@ -267,7 +275,7 @@ Official verified production release published directly via GitHub CLI.
 | **Version Name** | ``$NewVersionName`` |
 | **Version Code** | ``$NewVersionCode`` |
 | **Package ID** | ``com.carcast.mirror`` |
-| **File Size** | ``$([math]::Round((Get-Item `$distApk).Length / 1MB, 2)) MB`` |
+| **File Size** | ``$([math]::Round((Get-Item $distApk).Length / 1MB, 2)) MB`` |
 | **Signing Certificate (SHA-256)** | ``82:D5:7A:48:63:A3:CF:34:71:A6:29:3F:BE:CA:C3:AB:8F:44:21:8D:62:EF:28:FD:D2:2F:2E:85:C0:D8:92:8E`` |
 | **Update Compatibility** | 100% verified compatible with all previous CarCast Mirror installs |
 | **Target Android** | Android 8.0 (API 26) through Android 14+ (API 34) |
